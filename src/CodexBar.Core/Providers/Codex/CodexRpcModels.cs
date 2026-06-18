@@ -7,6 +7,9 @@ public sealed class RpcRateLimitsResponse
 {
     [JsonPropertyName("rateLimits")]
     public RpcRateLimitSnapshot RateLimits { get; set; } = new();
+
+    [JsonPropertyName("rateLimitsByLimitId")]
+    public Dictionary<string, RpcRateLimitSnapshot>? RateLimitsByLimitId { get; set; }
 }
 
 public sealed class RpcRateLimitSnapshot
@@ -15,6 +18,10 @@ public sealed class RpcRateLimitSnapshot
     private const string SecondaryKey = "secondary";
     private const string CreditsKey = "credits";
     private const string PlanTypeKey = "planType";
+    private const string LimitIdKey = "limitId";
+    private const string LimitNameKey = "limitName";
+    private const string IndividualLimitKey = "individualLimit";
+    private const string RateLimitReachedTypeKey = "rateLimitReachedType";
 
     [JsonPropertyName("primary")]
     public RpcRateLimitWindow? Primary { get; set; }
@@ -28,6 +35,12 @@ public sealed class RpcRateLimitSnapshot
     [JsonPropertyName("planType")]
     public string? PlanType { get; set; }
 
+    [JsonPropertyName("limitId")]
+    public string? LimitId { get; set; }
+
+    [JsonPropertyName("limitName")]
+    public string? LimitName { get; set; }
+
     [JsonExtensionData]
     public Dictionary<string, JsonElement> AdditionalRateLimits { get; set; } = [];
 
@@ -38,7 +51,11 @@ public sealed class RpcRateLimitSnapshot
             if (string.Equals(kvp.Key, PrimaryKey, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(kvp.Key, SecondaryKey, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(kvp.Key, CreditsKey, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(kvp.Key, PlanTypeKey, StringComparison.OrdinalIgnoreCase))
+                || string.Equals(kvp.Key, PlanTypeKey, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(kvp.Key, LimitIdKey, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(kvp.Key, LimitNameKey, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(kvp.Key, IndividualLimitKey, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(kvp.Key, RateLimitReachedTypeKey, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }

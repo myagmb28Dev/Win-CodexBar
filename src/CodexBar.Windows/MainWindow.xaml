@@ -99,8 +99,13 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel>
-                                    <TextBlock x:Name="HudHeaderText" Text="Codex" FontSize="17" FontWeight="SemiBold" />
-                                    <TextBlock x:Name="ModelSwitcherMetaText" FontSize="11" Foreground="#FFB9A7E8" />
+                                    <TextBlock
+                                        x:Name="HudHeaderText"
+                                        Text="Codex"
+                                        FontSize="17"
+                                        FontWeight="SemiBold"
+                                        MaxLines="2"
+                                        TextWrapping="WrapWholeWords" />
                                 </StackPanel>
 
                                 <Grid Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" ColumnSpacing="6">

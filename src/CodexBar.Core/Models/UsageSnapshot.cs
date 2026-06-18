@@ -12,7 +12,8 @@ public sealed record UsageSnapshot(
     RateWindow? Tertiary,
     DateTimeOffset UpdatedAt,
     ProviderIdentitySnapshot? Identity,
-    IReadOnlyList<ModelUsageSnapshot>? Models = null)
+    IReadOnlyList<ModelUsageSnapshot>? Models = null,
+    CodexModelSelection? ActiveModel = null)
 {
     public bool HasRateLimitWindows =>
         Primary is not null
@@ -25,6 +26,8 @@ public sealed record ModelUsageSnapshot(string ModelName, RateWindow? Current, R
 {
     public bool HasRateLimitWindows => Current is not null || Weekly is not null;
 }
+
+public sealed record CodexModelSelection(string Model, string? ReasoningEffort, string DisplayName, DateTimeOffset? UpdatedAt);
 
 public sealed record CreditEvent(Guid Id, DateTimeOffset Date, string Service, double CreditsUsed);
 

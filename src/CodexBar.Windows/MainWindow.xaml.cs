@@ -5,6 +5,7 @@ using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using Windows.Graphics;
@@ -15,10 +16,10 @@ namespace CodexBar.Windows;
 
 public sealed partial class MainWindow : Window
 {
-    private const double HudClientWidth = 380;
-    private const double HudClientHeight = 225;
+    private const double HudClientWidth = 265;
+    private const double HudClientHeight = 250;
     private const double SettingsClientWidth = HudClientWidth;
-    private const double SettingsClientHeight = 184;
+    private const double SettingsClientHeight = 174;
 
     private readonly UsageStore _usageStore;
     private readonly SettingsStore _settingsStore;
@@ -39,7 +40,7 @@ public sealed partial class MainWindow : Window
     {
         InitializeComponent();
         ConfigureCompactWindow();
-        RootLayout.KeyDown += OnModelNavigationKeyDown;
+        RootLayout.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(OnModelNavigationKeyDown), true);
         RootLayout.PointerPressed += (_, _) =>
         {
             RootLayout.Focus(FocusState.Pointer);
@@ -400,7 +401,6 @@ public sealed partial class MainWindow : Window
         AccountText.Text = FormatIdentity(snapshot?.Identity);
         ErrorText.Text = string.IsNullOrWhiteSpace(_usageStore.LastError) ? string.Empty : _usageStore.LastError;
         HudMetaText.Text = FormatHudMeta(snapshot, disabled);
-        HudHeaderText.Text = "Codex";
 
         UpdateModelPager();
         ApplyActiveModel();
@@ -409,11 +409,25 @@ public sealed partial class MainWindow : Window
     private void ApplyActiveModel()
     {
         var model = _modelUsages.Count > _activeModelIndex ? _modelUsages[_activeModelIndex] : null;
+        var modelDisplayName = model is null ? string.Empty : FormatModelDisplayName(model);
 
-        ModelSwitcherMetaText.Text = model?.DisplayName ?? string.Empty;
+        HudHeaderText.Text = FirstNonBlank(modelDisplayName, "Codex");
         ModelPageText.Text = _modelUsages.Count <= 1 ? string.Empty : $"{_activeModelIndex + 1} / {_modelUsages.Count}";
         ApplyWindowView(CurrentWindowPercentText, CurrentWindowText, model?.Current, out _targetCurrentBarValue);
         ApplyWindowView(WeeklyWindowPercentText, WeeklyWindowText, model?.Weekly, out _targetWeeklyBarValue);
+    }
+
+    private string FormatModelDisplayName(ModelUsageView model)
+    {
+        var activeModel = _usageStore.Snapshot?.ActiveModel;
+        if (activeModel is not null
+            && IsSameModelName(model.DisplayName, activeModel.Model)
+            && !string.IsNullOrWhiteSpace(activeModel.DisplayName))
+        {
+            return activeModel.DisplayName;
+        }
+
+        return model.DisplayName;
     }
 
     private void BuildModelUsages()
@@ -430,7 +444,7 @@ public sealed partial class MainWindow : Window
         }
         else
         {
-            AddModelUsage("Codex", snapshot?.Primary, snapshot?.Secondary);
+            AddModelUsage(FirstNonBlank(snapshot?.ActiveModel?.DisplayName, "Codex"), snapshot?.Primary, snapshot?.Secondary);
         }
 
         if (_activeModelIndex >= _modelUsages.Count)
@@ -460,6 +474,31 @@ public sealed partial class MainWindow : Window
         percentText.Text = FormatHudPercent(window);
         detailText.Text = FormatWindow(window);
         targetValue = window?.RemainingPercent ?? 0;
+    }
+
+    private static string FirstNonBlank(params string?[] values)
+    {
+        foreach (var value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static bool IsSameModelName(string lhs, string rhs) =>
+        string.Equals(NormalizeModelKey(lhs), NormalizeModelKey(rhs), StringComparison.OrdinalIgnoreCase);
+
+    private static string NormalizeModelKey(string value)
+    {
+        var chars = value
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToLowerInvariant)
+            .ToArray();
+        return new string(chars);
     }
 
     private string FormatHudMeta(UsageSnapshot? snapshot, bool disabled)

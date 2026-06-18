@@ -6,14 +6,56 @@ namespace CodexBar.Core.Providers.Codex;
 
 public static class CodexUsageMapper
 {
+    private static readonly string[] ModelContainerKeys = ["models", "modelLimits", "modelRateLimits", "rateLimitsByModel"];
+
+    public static UsageSnapshot? MapUsage(RpcRateLimitsResponse response, RpcAccountResponse? account, DateTimeOffset now)
+    {
+        var usage = MapUsage(response.RateLimits, account, now);
+        var bucketModels = MapRateLimitBucketModels(response.RateLimitsByLimitId);
+        if (bucketModels.Count == 0)
+        {
+            return usage;
+        }
+
+        var models = MergeModelUsages(usage?.Models, bucketModels);
+        var mappedWindows = models
+            .SelectMany(model => new[] { model.Current, model.Weekly })
+            .Where(window => window is not null)
+            .Cast<RateWindow>()
+            .ToArray();
+
+        var primary = usage?.Primary ?? mappedWindows.FirstOrDefault();
+        var secondary = usage?.Secondary ?? models.Select(model => model.Weekly).FirstOrDefault(window => window is not null);
+        var tertiary = usage?.Tertiary ?? mappedWindows.FirstOrDefault(window => !Equals(window, primary) && !Equals(window, secondary));
+
+        return usage is null
+            ? new UsageSnapshot(primary, secondary, tertiary, now, MapIdentity(response.RateLimits, account), models)
+            : usage with { Primary = primary, Secondary = secondary, Tertiary = tertiary, Models = models };
+    }
+
+    internal static UsageSnapshot WithMergedModels(UsageSnapshot usage, IReadOnlyList<ModelUsageSnapshot> additionalModels)
+    {
+        if (additionalModels.Count == 0)
+        {
+            return usage;
+        }
+
+        var models = MergeModelUsages(usage.Models, additionalModels);
+        var mappedWindows = models
+            .SelectMany(model => new[] { model.Current, model.Weekly })
+            .Where(window => window is not null)
+            .Cast<RateWindow>()
+            .ToArray();
+
+        var primary = usage.Primary ?? mappedWindows.FirstOrDefault();
+        var secondary = usage.Secondary ?? models.Select(model => model.Weekly).FirstOrDefault(window => window is not null);
+        var tertiary = usage.Tertiary ?? mappedWindows.FirstOrDefault(window => !Equals(window, primary) && !Equals(window, secondary));
+        return usage with { Primary = primary, Secondary = secondary, Tertiary = tertiary, Models = models };
+    }
+
     public static UsageSnapshot? MapUsage(RpcRateLimitSnapshot limits, RpcAccountResponse? account, DateTimeOffset now)
     {
-        var accountDetails = account?.Account;
-        var identity = new ProviderIdentitySnapshot(
-            UsageProvider.Codex,
-            IsAccountType(accountDetails?.Type, "chatgpt") ? NormalizeField(accountDetails?.Email) : null,
-            null,
-            NormalizeField(accountDetails?.PlanType) ?? NormalizeField(limits.PlanType));
+        var identity = MapIdentity(limits, account);
 
         var explicitPrimary = MapWindow(limits.Primary);
         var explicitSecondary = MapWindow(limits.Secondary);
@@ -39,6 +81,16 @@ public static class CodexUsageMapper
         }
 
         return new UsageSnapshot(primary, secondary, tertiary, now, identity, models);
+    }
+
+    private static ProviderIdentitySnapshot MapIdentity(RpcRateLimitSnapshot limits, RpcAccountResponse? account)
+    {
+        var accountDetails = account?.Account;
+        return new ProviderIdentitySnapshot(
+            UsageProvider.Codex,
+            IsAccountType(accountDetails?.Type, "chatgpt") ? NormalizeField(accountDetails?.Email) : null,
+            null,
+            NormalizeField(accountDetails?.PlanType) ?? NormalizeField(limits.PlanType));
     }
 
     public static CreditsSnapshot? MapCredits(RpcCreditsSnapshot? credits, DateTimeOffset now)
@@ -113,6 +165,105 @@ public static class CodexUsageMapper
             .ToArray();
     }
 
+    private static IReadOnlyList<ModelUsageSnapshot> MapRateLimitBucketModels(IReadOnlyDictionary<string, RpcRateLimitSnapshot>? buckets)
+    {
+        if (buckets is null || buckets.Count == 0)
+        {
+            return [];
+        }
+
+        var models = new List<ModelUsageSnapshot>();
+        foreach (var bucket in buckets)
+        {
+            var displayName = ResolveLimitModelName(bucket.Key, bucket.Value);
+            var current = MapWindow(bucket.Value.Primary);
+            var weekly = MapWindow(bucket.Value.Secondary);
+            foreach (var model in MapModelUsages(bucket.Value, current, weekly))
+            {
+                var modelName = string.Equals(model.ModelName, "Codex", StringComparison.OrdinalIgnoreCase)
+                    ? displayName
+                    : model.ModelName;
+                AddOrMergeModel(models, new ModelUsageSnapshot(modelName, model.Current, model.Weekly));
+            }
+        }
+
+        return models;
+    }
+
+    private static IReadOnlyList<ModelUsageSnapshot> MergeModelUsages(
+        IReadOnlyList<ModelUsageSnapshot>? existingModels,
+        IReadOnlyList<ModelUsageSnapshot> additionalModels)
+    {
+        var merged = new List<ModelUsageSnapshot>();
+        if (existingModels is not null)
+        {
+            foreach (var model in existingModels)
+            {
+                AddOrMergeModel(merged, model);
+            }
+        }
+
+        foreach (var model in additionalModels)
+        {
+            AddOrMergeModel(merged, model);
+        }
+
+        return merged;
+    }
+
+    private static void AddOrMergeModel(List<ModelUsageSnapshot> models, ModelUsageSnapshot candidate)
+    {
+        if (!candidate.HasRateLimitWindows)
+        {
+            return;
+        }
+
+        var existingIndex = models.FindIndex(model => IsSameModelName(model.ModelName, candidate.ModelName));
+        if (existingIndex < 0)
+        {
+            models.Add(candidate);
+            return;
+        }
+
+        var existing = models[existingIndex];
+        models[existingIndex] = new ModelUsageSnapshot(
+            existing.ModelName,
+            existing.Current ?? candidate.Current,
+            existing.Weekly ?? candidate.Weekly);
+    }
+
+    private static string ResolveLimitModelName(string rawKey, RpcRateLimitSnapshot bucket)
+    {
+        var rawName = FirstNonBlank(bucket.LimitName, bucket.LimitId, rawKey, "Codex");
+        return FormatModelName(StripLimitSuffix(rawName));
+    }
+
+    private static bool IsSameModelName(string lhs, string rhs) =>
+        string.Equals(NormalizeModelKey(lhs), NormalizeModelKey(rhs), StringComparison.OrdinalIgnoreCase);
+
+    private static string NormalizeModelKey(string value)
+    {
+        var chars = value
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToLowerInvariant)
+            .ToArray();
+        return new string(chars);
+    }
+
+    private static string StripLimitSuffix(string rawName)
+    {
+        var trimmed = rawName.Trim().TrimEnd(':').Trim();
+        foreach (var suffix in new[] { " rate limits", " rate limit", " limits", " limit" })
+        {
+            if (trimmed.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+            {
+                return trimmed[..^suffix.Length].Trim();
+            }
+        }
+
+        return trimmed;
+    }
+
     private static void AddModelUsage(List<ModelUsageBuilder> builders, string rawKey, JsonElement source)
     {
         if (TryMapWindow(source, out var directWindow))
@@ -123,22 +274,130 @@ public static class CodexUsageMapper
             return;
         }
 
+        if (source.ValueKind == JsonValueKind.Array)
+        {
+            var index = 0;
+            foreach (var element in source.EnumerateArray())
+            {
+                if (element.ValueKind != JsonValueKind.Object)
+                {
+                    index++;
+                    continue;
+                }
+
+                AddModelUsage(builders, ResolveArrayModelName(element, index), element);
+                index++;
+            }
+
+            return;
+        }
+
         if (!source.ValueKind.Equals(JsonValueKind.Object))
         {
             return;
         }
 
-        var model = GetOrAddModel(builders, FormatModelName(rawKey));
-        foreach (var property in source.EnumerateObject())
+        var sourceObject = source.EnumerateObject().ToArray();
+        if (sourceObject.Length == 0)
         {
-            if (!TryMapWindow(property.Value, out var window))
+            return;
+        }
+
+        if (IsLikelyModelContainer(rawKey, sourceObject))
+        {
+            foreach (var property in sourceObject)
+            {
+                AddModelUsage(builders, property.Name, property.Value);
+            }
+
+            return;
+        }
+
+        var model = GetOrAddModel(builders, FormatModelName(rawKey));
+        foreach (var property in sourceObject)
+        {
+            if (TryMapWindow(property.Value, out var window))
+            {
+                ApplyWindow(model, ResolveWindowKind(property.Name, window), window);
+                continue;
+            }
+
+            if (!IsWindowContainerKey(property.Name) || !property.Value.ValueKind.Equals(JsonValueKind.Object))
             {
                 continue;
             }
 
-            ApplyWindow(model, ResolveWindowKind(property.Name, window), window);
+            foreach (var nestedProperty in property.Value.EnumerateObject())
+            {
+                if (TryMapWindow(nestedProperty.Value, out var nestedWindow))
+                {
+                    ApplyWindow(model, ResolveWindowKind(nestedProperty.Name, nestedWindow), nestedWindow);
+                }
+            }
         }
     }
+
+    private static string ResolveArrayModelName(JsonElement element, int index)
+    {
+        if (TryGetString(element, "model", out var model) && !string.IsNullOrWhiteSpace(model))
+        {
+            return model;
+        }
+
+        if (TryGetString(element, "name", out var name) && !string.IsNullOrWhiteSpace(name))
+        {
+            return name;
+        }
+
+        if (TryGetString(element, "id", out var id) && !string.IsNullOrWhiteSpace(id))
+        {
+            return id;
+        }
+
+        return $"Model {index + 1}";
+    }
+
+    private static bool IsLikelyModelContainer(string rawKey, JsonProperty[] properties)
+    {
+        if (!IsModelContainerKey(rawKey) && IsWindowContainerKey(rawKey))
+        {
+            return false;
+        }
+
+        if (properties.Length <= 1)
+        {
+            return IsModelContainerKey(rawKey);
+        }
+
+        return IsModelContainerKey(rawKey)
+            || (
+                rawKey.Length > 0
+                && !ContainsWindowName(rawKey, "current")
+                && !ContainsWindowName(rawKey, "weekly")
+                && !ContainsWindowName(rawKey, "primary")
+                && !ContainsWindowName(rawKey, "secondary")
+                && properties.All(property => property.Value.ValueKind == JsonValueKind.Object)
+                && properties.All(property =>
+                    !TryMapWindow(property.Value, out _)
+                    && !ContainsWindowName(property.Name, "primary")
+                    && !ContainsWindowName(property.Name, "secondary")
+                    && !ContainsWindowName(property.Name, "weekly")
+                    && !ContainsWindowName(property.Name, "current"))
+            );
+    }
+
+    private static bool IsModelContainerKey(string key) =>
+        ModelContainerKeys.Any(candidate => string.Equals(key, candidate, StringComparison.OrdinalIgnoreCase))
+        || (key.IndexOf("model", StringComparison.OrdinalIgnoreCase) >= 0
+            && key.IndexOf("limit", StringComparison.OrdinalIgnoreCase) >= 0);
+
+    private static bool IsWindowContainerKey(string key) =>
+        string.Equals(key, "limits", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(key, "windows", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(key, "rateLimits", StringComparison.OrdinalIgnoreCase)
+        || ContainsWindowName(key, "limits")
+        || ContainsWindowName(key, "windows")
+        || ContainsWindowName(key, "rate");
 
     private static ModelUsageBuilder GetOrAddModel(List<ModelUsageBuilder> builders, string displayName)
     {
@@ -203,7 +462,7 @@ public static class CodexUsageMapper
         return trimmed;
     }
 
-    private static string FormatModelName(string rawName)
+    internal static string FormatModelName(string rawName)
     {
         var normalized = rawName.Replace('_', ' ').Replace('-', ' ').Trim();
         if (string.IsNullOrWhiteSpace(normalized))
@@ -303,6 +562,18 @@ public static class CodexUsageMapper
         return TryGetProperty(node, propertyName, out var property) && TryReadDouble(property, out value);
     }
 
+    private static bool TryGetString(JsonElement node, string propertyName, out string? value)
+    {
+        value = null;
+        if (!TryGetProperty(node, propertyName, out var property) || property.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        value = property.GetString();
+        return !string.IsNullOrWhiteSpace(value);
+    }
+
     private static bool TryGetInt(JsonElement node, string propertyName, out int? value)
     {
         value = null;
@@ -387,6 +658,19 @@ public static class CodexUsageMapper
     {
         var trimmed = value?.Trim();
         return string.IsNullOrEmpty(trimmed) ? null : trimmed;
+    }
+
+    private static string FirstNonBlank(params string?[] values)
+    {
+        foreach (var value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return string.Empty;
     }
 
     private static bool IsAccountType(string? lhs, string rhs) => string.Equals(lhs?.Trim(), rhs, StringComparison.OrdinalIgnoreCase);
