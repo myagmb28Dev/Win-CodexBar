@@ -179,10 +179,6 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void PrevModelButton_Click(object sender, RoutedEventArgs args) => SetActiveModel(_activeModelIndex - 1, -1);
-
-    private void NextModelButton_Click(object sender, RoutedEventArgs args) => SetActiveModel(_activeModelIndex + 1, 1);
-
     private void SetActiveModel(int nextIndex, int preferredDirection = 0)
     {
         if (_modelWindows.Count <= 1)
@@ -417,9 +413,14 @@ public sealed partial class MainWindow : Window
     {
         _modelWindows.Clear();
         var snapshot = _usageStore.Snapshot;
-        AddWindow("Primary", snapshot?.Primary);
-        AddWindow("Secondary", snapshot?.Secondary);
-        AddWindow("Tertiary", snapshot?.Tertiary);
+        var primary = snapshot?.Primary;
+        var secondary = snapshot?.Secondary;
+        var tertiary = snapshot?.Tertiary;
+
+        var hasSecondary = secondary is not null;
+        AddWindow(ResolveWindowLabel(primary, 0, hasSecondary), primary);
+        AddWindow(ResolveWindowLabel(secondary, 1, hasSecondary), secondary);
+        AddWindow(ResolveWindowLabel(tertiary, 2, hasSecondary), tertiary);
 
         if (_activeModelIndex >= _modelWindows.Count)
         {
@@ -437,12 +438,50 @@ public sealed partial class MainWindow : Window
         _modelWindows.Add(new ModelWindowView(label, window));
     }
 
+    private static string ResolveWindowLabel(RateWindow? window, int index, bool hasSecondaryWindow)
+    {
+        if (window is null)
+        {
+            return index switch
+            {
+                0 => "Current",
+                1 => "Window 2",
+                _ => $"Window {index + 1}",
+            };
+        }
+
+        if (IsWeeklyWindow(window))
+        {
+            return "Weekly";
+        }
+
+        if (hasSecondaryWindow && index == 0)
+        {
+            return "Current";
+        }
+
+        return index switch
+        {
+            0 => "Current",
+            1 => $"Window {index + 1}",
+            _ => $"Window {index + 1}",
+        };
+    }
+
+    private static bool IsWeeklyWindow(RateWindow? window)
+    {
+        if (window?.WindowMinutes is null)
+        {
+            return false;
+        }
+
+        var minutes = window.WindowMinutes.Value;
+        return minutes is >= 7 * 24 * 60 and < 8 * 24 * 60;
+    }
+
     private void UpdateModelPager()
     {
         var canNavigate = _modelWindows.Count > 1;
-        ModelTogglePanel.Visibility = canNavigate ? Visibility.Visible : Visibility.Collapsed;
-        PrevModelButton.IsEnabled = canNavigate;
-        NextModelButton.IsEnabled = canNavigate;
         ModelPageText.Visibility = canNavigate ? Visibility.Visible : Visibility.Collapsed;
     }
 

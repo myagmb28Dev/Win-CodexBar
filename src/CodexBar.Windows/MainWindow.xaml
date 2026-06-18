@@ -104,38 +104,6 @@
                                 </StackPanel>
 
                                 <Grid Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" ColumnSpacing="6">
-                                    <StackPanel x:Name="ModelTogglePanel" Orientation="Horizontal" Spacing="6" Visibility="Collapsed">
-                                        <Button
-                                            x:Name="PrevModelButton"
-                                            Width="18"
-                                            Height="18"
-                                            MinWidth="18"
-                                            MinHeight="18"
-                                            Padding="0"
-                                            BorderThickness="0"
-                                            Background="Transparent"
-                                            Foreground="#CFA7E8"
-                                            FontWeight="Bold"
-                                            Opacity="0.25"
-                                            FontFamily="Segoe UI Symbol"
-                                            Content="&#x25C0;"
-                                            Click="PrevModelButton_Click" />
-                                        <Button
-                                            x:Name="NextModelButton"
-                                            Width="18"
-                                            Height="18"
-                                            MinWidth="18"
-                                            MinHeight="18"
-                                            Padding="0"
-                                            BorderThickness="0"
-                                            Background="Transparent"
-                                            Foreground="#CFA7E8"
-                                            FontWeight="Bold"
-                                            Opacity="0.25"
-                                            FontFamily="Segoe UI Symbol"
-                                            Content="&#x25B6;"
-                                            Click="NextModelButton_Click" />
-                                    </StackPanel>
                                     <TextBlock
                                         x:Name="ModelPageText"
                                         Margin="8,0,0,0"
