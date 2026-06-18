@@ -31,7 +31,7 @@ public sealed class CodexCliFetchStrategy : IProviderFetchStrategy
         var now = DateTimeOffset.Now;
         try
         {
-            await using var transport = _transportFactory.Start(executable, BuildArguments(activeModel), context.Environment);
+            await using var transport = _transportFactory.Start(executable, BaseArguments, context.Environment);
             await using var client = new CodexRpcClient(transport, context.InitializeTimeout, context.RequestTimeout);
             await client.InitializeAsync(cancellationToken).ConfigureAwait(false);
 
@@ -72,7 +72,7 @@ public sealed class CodexCliFetchStrategy : IProviderFetchStrategy
     private bool TryCreateSessionOnlyResult(CodexSessionStateSnapshot? sessionState, DateTimeOffset now, out ProviderFetchResult result)
     {
         result = null!;
-        if (sessionState is null || (sessionState.ActiveModel is null && sessionState.Models.Count == 0))
+        if (sessionState is null || sessionState.Models.Count == 0)
         {
             return false;
         }
@@ -87,25 +87,5 @@ public sealed class CodexCliFetchStrategy : IProviderFetchStrategy
         result = new ProviderFetchResult(usage, null, "codex-session", Id, ProviderFetchKind.LocalProbe);
         return true;
     }
-
-    private static IReadOnlyList<string> BuildArguments(CodexModelSelection? activeModel)
-    {
-        if (activeModel is null || string.IsNullOrWhiteSpace(activeModel.Model))
-        {
-            return BaseArguments;
-        }
-
-        var arguments = new List<string>
-        {
-            "-c",
-            $"model={TomlString(activeModel.Model)}"
-        };
-
-        arguments.AddRange(BaseArguments);
-        return arguments;
-    }
-
-    private static string TomlString(string value) =>
-        "\"" + value.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
 }
 

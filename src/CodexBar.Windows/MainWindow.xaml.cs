@@ -420,9 +420,17 @@ public sealed partial class MainWindow : Window
     private string FormatModelDisplayName(ModelUsageView model)
     {
         var activeModel = _usageStore.Snapshot?.ActiveModel;
-        if (activeModel is not null
-            && IsSameModelName(model.DisplayName, activeModel.Model)
-            && !string.IsNullOrWhiteSpace(activeModel.DisplayName))
+        if (activeModel is null || string.IsNullOrWhiteSpace(activeModel.DisplayName))
+        {
+            return model.DisplayName;
+        }
+
+        if (IsSameModelName(model.DisplayName, activeModel.Model))
+        {
+            return activeModel.DisplayName;
+        }
+
+        if (IsGenericCodexModel(model.DisplayName) && !HasExplicitActiveModelPage(activeModel.Model))
         {
             return activeModel.DisplayName;
         }
@@ -491,6 +499,12 @@ public sealed partial class MainWindow : Window
 
     private static bool IsSameModelName(string lhs, string rhs) =>
         string.Equals(NormalizeModelKey(lhs), NormalizeModelKey(rhs), StringComparison.OrdinalIgnoreCase);
+
+    private bool HasExplicitActiveModelPage(string modelName) =>
+        _modelUsages.Any(model => !IsGenericCodexModel(model.DisplayName) && IsSameModelName(model.DisplayName, modelName));
+
+    private static bool IsGenericCodexModel(string modelName) =>
+        string.Equals(modelName.Trim(), "Codex", StringComparison.OrdinalIgnoreCase);
 
     private static string NormalizeModelKey(string value)
     {
