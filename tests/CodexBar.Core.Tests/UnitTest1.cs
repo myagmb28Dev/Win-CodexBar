@@ -403,6 +403,28 @@ public sealed class CodexSessionStateReaderTests
     }
 
     [Fact]
+    public void ReadsSessionFileWhileCodexIsStillWritingIt()
+    {
+        var codexHome = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var sessionDir = Path.Combine(codexHome, "sessions", "2026", "06", "18");
+        Directory.CreateDirectory(sessionDir);
+
+        var userPath = Path.Combine(sessionDir, "rollout-user.jsonl");
+        File.WriteAllText(userPath, """
+        {"timestamp":"2026-06-18T10:00:00Z","type":"session_meta","payload":{"id":"user","thread_source":"user","source":"desktop"}}
+        {"timestamp":"2026-06-18T10:00:01Z","type":"turn_context","payload":{"model":"gpt-5.4-mini","effort":"high"}}
+        """);
+
+        using var writerHandle = new FileStream(userPath, FileMode.Open, FileAccess.Write, FileShare.ReadWrite);
+        var selection = CodexSessionStateReader.ReadLatest(TestEnvironment(codexHome));
+
+        Assert.NotNull(selection);
+        Assert.Equal("gpt-5.4-mini", selection!.Model);
+        Assert.Equal("high", selection.ReasoningEffort);
+        Assert.Equal("GPT-5.4 Mini High", selection.DisplayName);
+    }
+
+    [Fact]
     public void ReadsModelFromNestedModelObject()
     {
         var codexHome = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));

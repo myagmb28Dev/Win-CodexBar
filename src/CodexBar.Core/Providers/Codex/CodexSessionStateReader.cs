@@ -100,7 +100,7 @@ public static class CodexSessionStateReader
 
         try
         {
-            foreach (var line in File.ReadLines(path))
+            foreach (var line in ReadSharedLines(path))
             {
                 if (!line.Contains("\"type\"", StringComparison.Ordinal)
                     || (!line.Contains("turn_context", StringComparison.Ordinal)
@@ -178,6 +178,17 @@ public static class CodexSessionStateReader
 
     private static bool ContainsToken(string value, string token) =>
         value.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0;
+
+    private static IEnumerable<string> ReadSharedLines(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(stream);
+        string? line;
+        while ((line = reader.ReadLine()) is not null)
+        {
+            yield return line;
+        }
+    }
 
     private static int CompareSelectionTime(CodexModelSelection lhs, CodexModelSelection? rhs)
     {
