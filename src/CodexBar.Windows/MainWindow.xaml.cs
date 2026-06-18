@@ -20,6 +20,7 @@ public sealed partial class MainWindow : Window
     private const double HudClientHeight = 250;
     private const double SettingsClientWidth = HudClientWidth;
     private const double SettingsClientHeight = 174;
+    private const double KeyboardScrollStep = 36;
 
     private readonly UsageStore _usageStore;
     private readonly SettingsStore _settingsStore;
@@ -172,22 +173,54 @@ public sealed partial class MainWindow : Window
 
     private void OnModelNavigationKeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
     {
-        if (HudView.Visibility != Visibility.Visible || _modelUsages.Count <= 1)
+        if (HudView.Visibility != Visibility.Visible)
         {
             return;
         }
 
         switch (e.Key)
         {
-            case VirtualKey.Left:
+            case VirtualKey.Left when _modelUsages.Count > 1:
                 SetActiveModel(_activeModelIndex - 1, -1);
                 e.Handled = true;
                 break;
-            case VirtualKey.Right:
+            case VirtualKey.Right when _modelUsages.Count > 1:
                 SetActiveModel(_activeModelIndex + 1, 1);
                 e.Handled = true;
                 break;
+            case VirtualKey.Down:
+                ScrollHudBy(KeyboardScrollStep);
+                e.Handled = true;
+                break;
+            case VirtualKey.Up:
+                ScrollHudBy(-KeyboardScrollStep);
+                e.Handled = true;
+                break;
+            case VirtualKey.PageDown:
+                ScrollHudBy(HudScrollViewer.ViewportHeight);
+                e.Handled = true;
+                break;
+            case VirtualKey.PageUp:
+                ScrollHudBy(-HudScrollViewer.ViewportHeight);
+                e.Handled = true;
+                break;
+            case VirtualKey.Home:
+                ScrollHudTo(0);
+                e.Handled = true;
+                break;
+            case VirtualKey.End:
+                ScrollHudTo(HudScrollViewer.ScrollableHeight);
+                e.Handled = true;
+                break;
         }
+    }
+
+    private void ScrollHudBy(double delta) => ScrollHudTo(HudScrollViewer.VerticalOffset + delta);
+
+    private void ScrollHudTo(double verticalOffset)
+    {
+        var targetOffset = Math.Clamp(verticalOffset, 0, Math.Max(0, HudScrollViewer.ScrollableHeight));
+        HudScrollViewer.ChangeView(null, targetOffset, null, disableAnimation: false);
     }
 
     private void SetActiveModel(int nextIndex, int preferredDirection = 0)
@@ -400,7 +433,9 @@ public sealed partial class MainWindow : Window
         CreditsText.Text = credits is null ? "unknown" : $"{credits.Remaining:0.##} remaining";
         AccountText.Text = FormatIdentity(snapshot?.Identity);
         ErrorText.Text = string.IsNullOrWhiteSpace(_usageStore.LastError) ? string.Empty : _usageStore.LastError;
-        HudMetaText.Text = FormatHudMeta(snapshot, disabled);
+        var hudMeta = FormatHudMeta(snapshot, disabled);
+        HudMetaText.Text = hudMeta;
+        HudMetaText.Visibility = string.IsNullOrWhiteSpace(hudMeta) ? Visibility.Collapsed : Visibility.Visible;
 
         UpdateModelPager();
         ApplyActiveModel();
@@ -572,17 +607,7 @@ public sealed partial class MainWindow : Window
             return "Provider disabled";
         }
 
-        if (_usageStore.IsRefreshing)
-        {
-            return "Refreshing";
-        }
-
-        if (snapshot is not null)
-        {
-            return $"Updated {snapshot.UpdatedAt.LocalDateTime:t}";
-        }
-
-        return string.IsNullOrWhiteSpace(_usageStore.LastError) ? "No usage loaded" : _usageStore.LastError;
+        return string.IsNullOrWhiteSpace(_usageStore.LastError) ? string.Empty : _usageStore.LastError;
     }
 
     private static string FormatHudPercent(RateWindow? window) =>

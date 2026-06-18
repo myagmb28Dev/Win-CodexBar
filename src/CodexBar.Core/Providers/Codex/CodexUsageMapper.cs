@@ -36,27 +36,8 @@ public static class CodexUsageMapper
 
     public static UsageSnapshot? MapUsage(RpcRateLimitsResponse response, RpcAccountResponse? account, DateTimeOffset now)
     {
-        var usage = MapUsage(response.RateLimits, account, now);
-        var bucketModels = MapRateLimitBucketModels(response.RateLimitsByLimitId);
-        if (bucketModels.Count == 0)
-        {
-            return usage;
-        }
-
-        var models = MergeModelUsages(usage?.Models, bucketModels);
-        var mappedWindows = models
-            .SelectMany(model => new[] { model.Current, model.Weekly })
-            .Where(window => window is not null)
-            .Cast<RateWindow>()
-            .ToArray();
-
-        var primary = usage?.Primary ?? mappedWindows.FirstOrDefault();
-        var secondary = usage?.Secondary ?? models.Select(model => model.Weekly).FirstOrDefault(window => window is not null);
-        var tertiary = usage?.Tertiary ?? mappedWindows.FirstOrDefault(window => !Equals(window, primary) && !Equals(window, secondary));
-
-        return usage is null
-            ? new UsageSnapshot(primary, secondary, tertiary, now, MapIdentity(response.RateLimits, account), models)
-            : usage with { Primary = primary, Secondary = secondary, Tertiary = tertiary, Models = models };
+        var buckets = EnumerateLimitBuckets(response.RateLimits, response.RateLimitsByLimitId).ToArray();
+        return MapUsageFromBuckets(response.RateLimits, buckets, account, now);
     }
 
     internal static UsageSnapshot WithMergedModels(UsageSnapshot usage, IReadOnlyList<ModelUsageSnapshot> additionalModels)
@@ -81,11 +62,20 @@ public static class CodexUsageMapper
 
     public static UsageSnapshot? MapUsage(RpcRateLimitSnapshot limits, RpcAccountResponse? account, DateTimeOffset now)
     {
-        var identity = MapIdentity(limits, account);
+        return MapUsageFromBuckets(limits, [new CodexLimitBucket("Codex", limits)], account, now);
+    }
 
-        var explicitPrimary = MapWindow(limits.Primary);
-        var explicitSecondary = MapWindow(limits.Secondary);
-        var models = MapModelUsages(limits, explicitPrimary, explicitSecondary);
+    private static UsageSnapshot? MapUsageFromBuckets(
+        RpcRateLimitSnapshot rootLimits,
+        IReadOnlyList<CodexLimitBucket> buckets,
+        RpcAccountResponse? account,
+        DateTimeOffset now)
+    {
+        var identity = MapIdentity(rootLimits, account);
+
+        var explicitPrimary = MapWindow(rootLimits.Primary);
+        var explicitSecondary = MapWindow(rootLimits.Secondary);
+        var models = MapLimitBuckets(buckets);
         var mappedWindows = models
             .SelectMany(model => new[] { model.Current, model.Weekly })
             .Where(window => window is not null)
@@ -107,6 +97,23 @@ public static class CodexUsageMapper
         }
 
         return new UsageSnapshot(primary, secondary, tertiary, now, identity, models);
+    }
+
+    private static IEnumerable<CodexLimitBucket> EnumerateLimitBuckets(
+        RpcRateLimitSnapshot rootLimits,
+        IReadOnlyDictionary<string, RpcRateLimitSnapshot>? buckets)
+    {
+        yield return new CodexLimitBucket("Codex", rootLimits);
+
+        if (buckets is null)
+        {
+            yield break;
+        }
+
+        foreach (var bucket in buckets)
+        {
+            yield return new CodexLimitBucket(ResolveLimitModelName(bucket.Key, bucket.Value), bucket.Value);
+        }
     }
 
     private static ProviderIdentitySnapshot MapIdentity(RpcRateLimitSnapshot limits, RpcAccountResponse? account)
@@ -191,23 +198,17 @@ public static class CodexUsageMapper
             .ToArray();
     }
 
-    private static IReadOnlyList<ModelUsageSnapshot> MapRateLimitBucketModels(IReadOnlyDictionary<string, RpcRateLimitSnapshot>? buckets)
+    private static IReadOnlyList<ModelUsageSnapshot> MapLimitBuckets(IReadOnlyList<CodexLimitBucket> buckets)
     {
-        if (buckets is null || buckets.Count == 0)
-        {
-            return [];
-        }
-
         var models = new List<ModelUsageSnapshot>();
         foreach (var bucket in buckets)
         {
-            var displayName = ResolveLimitModelName(bucket.Key, bucket.Value);
-            var current = MapWindow(bucket.Value.Primary);
-            var weekly = MapWindow(bucket.Value.Secondary);
-            foreach (var model in MapModelUsages(bucket.Value, current, weekly))
+            var current = MapWindow(bucket.Limits.Primary);
+            var weekly = MapWindow(bucket.Limits.Secondary);
+            foreach (var model in MapModelUsages(bucket.Limits, current, weekly))
             {
                 var modelName = string.Equals(model.ModelName, "Codex", StringComparison.OrdinalIgnoreCase)
-                    ? displayName
+                    ? bucket.DisplayName
                     : model.ModelName;
                 AddOrMergeModel(models, new ModelUsageSnapshot(modelName, model.Current, model.Weekly));
             }
@@ -455,7 +456,7 @@ public static class CodexUsageMapper
 
     private static ModelUsageBuilder GetOrAddModel(List<ModelUsageBuilder> builders, string displayName)
     {
-        var existing = builders.FirstOrDefault(builder => string.Equals(builder.DisplayName, displayName, StringComparison.OrdinalIgnoreCase));
+        var existing = builders.FirstOrDefault(builder => IsSameModelName(builder.DisplayName, displayName));
         if (existing is not null)
         {
             return existing;
@@ -766,4 +767,6 @@ public static class CodexUsageMapper
         public RateWindow? Current { get; set; }
         public RateWindow? Weekly { get; set; }
     }
+
+    private sealed record CodexLimitBucket(string DisplayName, RpcRateLimitSnapshot Limits);
 }

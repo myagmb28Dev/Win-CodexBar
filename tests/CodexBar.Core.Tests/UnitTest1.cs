@@ -254,6 +254,42 @@ public sealed class MappingTests
     }
 
     [Fact]
+    public void MapsAllLimitSourcesThroughCommonCodexBuckets()
+    {
+        var response = JsonSerializer.Deserialize<RpcRateLimitsResponse>(JsonSerializer.Serialize(new
+        {
+            rateLimits = new Dictionary<string, object?>
+            {
+                ["primary"] = new { usedPercent = 12.0, windowDurationMins = 300, resetsAt = 1_800_000_000L },
+                ["gpt-5.4-high"] = new { usedPercent = 30.0, windowDurationMins = 300, resetsAt = 1_800_100_000L },
+                ["gpt-5.4-low"] = new { usedPercent = 45.0, windowDurationMins = 10080, resetsAt = 1_800_200_000L }
+            },
+            rateLimitsByLimitId = new Dictionary<string, object?>
+            {
+                ["gpt-5.3-codex-spark"] = new
+                {
+                    limitId = "gpt-5.3-codex-spark",
+                    limitName = "GPT-5.3-Codex-Spark",
+                    primary = new { usedPercent = 20.0, windowDurationMins = 300, resetsAt = 1_800_300_000L },
+                    secondary = new { usedPercent = 6.0, windowDurationMins = 10080, resetsAt = 1_800_400_000L }
+                }
+            }
+        }))!;
+
+        var usage = CodexUsageMapper.MapUsage(response, null, DateTimeOffset.UnixEpoch)!;
+
+        Assert.Equal(3, usage.Models!.Count);
+        Assert.Equal("Codex", usage.Models[0].ModelName);
+        Assert.Equal(12, usage.Models[0].Current!.UsedPercent);
+        Assert.Equal("GPT-5.4 High", usage.Models[1].ModelName);
+        Assert.Equal(30, usage.Models[1].Current!.UsedPercent);
+        Assert.Equal(45, usage.Models[1].Weekly!.UsedPercent);
+        Assert.Equal("GPT-5.3 Codex Spark", usage.Models[2].ModelName);
+        Assert.Equal(20, usage.Models[2].Current!.UsedPercent);
+        Assert.Equal(6, usage.Models[2].Weekly!.UsedPercent);
+    }
+
+    [Fact]
     public void MissingExecutableReturnsNull()
     {
         var path = CommandLocator.ResolveExecutable("definitely-not-codexbar-test-command", new Dictionary<string, string>
@@ -338,6 +374,35 @@ public sealed class CodexSessionStateReaderTests
     }
 
     [Fact]
+    public void ReadsLatestUserTurnContextAndSkipsAutoReviewSessions()
+    {
+        var codexHome = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var sessionDir = Path.Combine(codexHome, "sessions", "2026", "06", "18");
+        Directory.CreateDirectory(sessionDir);
+
+        var userPath = Path.Combine(sessionDir, "rollout-user.jsonl");
+        File.WriteAllText(userPath, """
+        {"timestamp":"2026-06-18T10:00:00Z","type":"session_meta","payload":{"id":"user","thread_source":"user","source":"desktop"}}
+        {"timestamp":"2026-06-18T10:00:01Z","type":"turn_context","payload":{"model":"gpt-5.5","effort":"xhigh"}}
+        """);
+
+        var autoReviewPath = Path.Combine(sessionDir, "rollout-auto-review.jsonl");
+        File.WriteAllText(autoReviewPath, """
+        {"timestamp":"2026-06-18T10:01:00Z","type":"session_meta","payload":{"id":"auto","source":"desktop"}}
+        {"timestamp":"2026-06-18T10:01:01Z","type":"turn_context","payload":{"model":"codex-auto-review","effort":"low"}}
+        {"timestamp":"2026-06-18T10:01:02Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":1.0,"window_minutes":300,"resets_at":1800000000}}}}
+        """);
+        File.SetLastWriteTimeUtc(autoReviewPath, DateTime.UtcNow.AddMinutes(1));
+
+        var selection = CodexSessionStateReader.ReadLatest(TestEnvironment(codexHome));
+
+        Assert.NotNull(selection);
+        Assert.Equal("gpt-5.5", selection!.Model);
+        Assert.Equal("xhigh", selection.ReasoningEffort);
+        Assert.Equal("GPT-5.5 XHigh", selection.DisplayName);
+    }
+
+    [Fact]
     public void ReadsModelFromNestedModelObject()
     {
         var codexHome = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -377,6 +442,27 @@ public sealed class CodexSessionStateReaderTests
         Assert.Equal("gpt-5.3-codex-spark", selection!.Model);
         Assert.Equal("xhigh", selection.ReasoningEffort);
         Assert.Equal("GPT-5.3 Codex Spark XHigh", selection.DisplayName);
+    }
+
+    [Fact]
+    public void PrefersCollaborationModeReasoningFromThreadSettings()
+    {
+        var codexHome = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var sessionDir = Path.Combine(codexHome, "sessions", "2026", "06", "18");
+        Directory.CreateDirectory(sessionDir);
+
+        var userPath = Path.Combine(sessionDir, "rollout-user.jsonl");
+        File.WriteAllText(userPath, """
+        {"timestamp":"2026-06-18T00:59:00Z","type":"session_meta","payload":{"id":"user","thread_source":"user","source":"desktop"}}
+        {"timestamp":"2026-06-18T00:59:01Z","type":"thread_settings_updated","payload":{"threadSettings":{"model":"gpt-5.5","effort":"high","collaborationMode":{"settings":{"model":"gpt-5.5","reasoning_effort":"xhigh"}}}}}
+        """);
+
+        var selection = CodexSessionStateReader.ReadLatest(TestEnvironment(codexHome));
+
+        Assert.NotNull(selection);
+        Assert.Equal("gpt-5.5", selection!.Model);
+        Assert.Equal("xhigh", selection.ReasoningEffort);
+        Assert.Equal("GPT-5.5 XHigh", selection.DisplayName);
     }
 
     [Fact]

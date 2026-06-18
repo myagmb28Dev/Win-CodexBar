@@ -58,19 +58,38 @@ public static class CodexSessionStateReader
             IgnoreInaccessible = true
         };
 
+        CodexSessionStateSnapshot? latestStateWithActiveModel = null;
+        CodexSessionStateSnapshot? latestStateWithLimits = null;
+
         foreach (var file in Directory.EnumerateFiles(sessionsRoot, "rollout-*.jsonl", options)
                      .Select(path => new FileInfo(path))
                      .OrderByDescending(file => file.LastWriteTimeUtc)
                      .Take(MaxSessionFilesToScan))
         {
             var state = ReadSessionFile(file.FullName, out var isSubagent);
-            if (state is not null && !isSubagent)
+            if (state is null || isSubagent)
             {
-                return state;
+                continue;
+            }
+
+            if (state.ActiveModel is not null)
+            {
+                if (latestStateWithActiveModel is null
+                    || CompareSelectionTime(state.ActiveModel, latestStateWithActiveModel.ActiveModel) > 0)
+                {
+                    latestStateWithActiveModel = state;
+                }
+
+                continue;
+            }
+
+            if (state.Models.Count > 0 && latestStateWithLimits is null)
+            {
+                latestStateWithLimits = state;
             }
         }
 
-        return null;
+        return latestStateWithActiveModel ?? latestStateWithLimits;
     }
 
     private static CodexSessionStateSnapshot? ReadSessionFile(string path, out bool isSubagent)
@@ -114,13 +133,19 @@ public static class CodexSessionStateReader
                         continue;
                     }
 
+                    CodexModelSelection? selection = null;
                     if (string.Equals(type, "turn_context", StringComparison.OrdinalIgnoreCase))
                     {
-                        latestSelection = ReadTurnContext(root, payload);
+                        selection = ReadTurnContext(root, payload);
                     }
                     else if (ContainsToken(type, "thread_settings") || ContainsToken(type, "threadSettings"))
                     {
-                        latestSelection = ReadThreadSettings(root, payload);
+                        selection = ReadThreadSettings(root, payload);
+                    }
+
+                    if (selection is not null && !IsInternalModel(selection.Model))
+                    {
+                        latestSelection = selection;
                     }
 
                     if (TryReadRateLimits(payload, out var rateLimitModel))
@@ -153,6 +178,19 @@ public static class CodexSessionStateReader
 
     private static bool ContainsToken(string value, string token) =>
         value.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0;
+
+    private static int CompareSelectionTime(CodexModelSelection lhs, CodexModelSelection? rhs)
+    {
+        if (rhs is null)
+        {
+            return 1;
+        }
+
+        return Nullable.Compare(lhs.UpdatedAt, rhs.UpdatedAt);
+    }
+
+    private static bool IsInternalModel(string model) =>
+        model.IndexOf("auto-review", StringComparison.OrdinalIgnoreCase) >= 0;
 
     private static bool IsSubagentSession(JsonElement root)
     {
@@ -190,13 +228,17 @@ public static class CodexSessionStateReader
         var settings = payload.TryGetProperty("threadSettings", out var threadSettings)
             ? threadSettings
             : payload.TryGetProperty("thread_settings", out var snakeThreadSettings) ? snakeThreadSettings : payload;
-        var model = ReadModel(settings);
+        var model = TryReadCollaborationModeModel(settings, out var collaborationModel)
+            ? collaborationModel
+            : ReadModel(settings);
         if (string.IsNullOrWhiteSpace(model))
         {
             return null;
         }
 
-        var effort = ReadReasoningEffort(settings);
+        var effort = TryReadCollaborationModeReasoningEffort(settings, out var collaborationEffort)
+            ? collaborationEffort
+            : ReadReasoningEffort(settings);
         var timestamp = TryGetTimestamp(root);
         return CreateSelection(model, effort, timestamp);
     }
@@ -329,8 +371,19 @@ public static class CodexSessionStateReader
             return effort;
         }
 
-        return TryGetCollaborationModeSetting(payload, "reasoning_effort", out var fallback) ? fallback : null;
+        return TryReadCollaborationModeReasoningEffort(payload, out var fallback) ? fallback : null;
     }
+
+    private static bool TryReadCollaborationModeModel(JsonElement payload, out string? value) =>
+        TryGetCollaborationModeSetting(payload, "model", out value)
+        || TryGetCollaborationModeSetting(payload, "model_name", out value);
+
+    private static bool TryReadCollaborationModeReasoningEffort(JsonElement payload, out string? value) =>
+        TryGetCollaborationModeSetting(payload, "reasoning_effort", out value)
+        || TryGetCollaborationModeSetting(payload, "reasoningEffort", out value)
+        || TryGetCollaborationModeSetting(payload, "model_reasoning_effort", out value)
+        || TryGetCollaborationModeSetting(payload, "modelReasoningEffort", out value)
+        || TryGetCollaborationModeSetting(payload, "effort", out value);
 
     private static bool TryGetCollaborationModeSetting(JsonElement payload, string name, out string? value)
     {
