@@ -1,16 +1,17 @@
-name: Release
+name: Build
 
 on:
+  workflow_dispatch:
   push:
-    tags:
-      - v*
+    branches:
+      - master
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: false
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   DOTNET_NOLOGO: true
@@ -19,28 +20,19 @@ env:
   WINDOWS_CODESIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PFX_PASSWORD }}
 
 jobs:
-  release:
+  build:
     runs-on: windows-latest
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Resolve release version
-        id: release
+      - name: Resolve build version
+        id: build
         shell: pwsh
         run: |
-          $version = $env:GITHUB_REF_NAME.Trim()
-          if ($version.StartsWith('v', [StringComparison]::OrdinalIgnoreCase)) {
-            $version = $version.Substring(1)
-          }
-
-          if ($version -notmatch '^\d+\.\d+\.\d+([-.+][0-9A-Za-z.-]+)?$') {
-            throw "Tag must look like v1.2.3. Received: $env:GITHUB_REF_NAME"
-          }
-
+          $version = '0.0.${{ github.run_number }}'
           "version=$version" >> $env:GITHUB_OUTPUT
-          "tag=v$version" >> $env:GITHUB_OUTPUT
 
       - name: Set up .NET SDK
         uses: actions/setup-dotnet@v4
@@ -91,7 +83,7 @@ jobs:
 
       - name: Build installer
         shell: cmd
-        run: build-installer.cmd ${{ steps.release.outputs.version }}
+        run: build-installer.cmd ${{ steps.build.outputs.version }}
 
       - name: Collect installer metadata
         id: installer
@@ -119,31 +111,6 @@ jobs:
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: WindexBarSetup-${{ steps.release.outputs.version }}
+          name: WindexBarSetup-${{ steps.build.outputs.version }}
           path: ${{ steps.installer.outputs.path }}
           if-no-files-found: error
-
-      - name: Publish GitHub release
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $tag = '${{ steps.release.outputs.tag }}'
-          $version = '${{ steps.release.outputs.version }}'
-          $installer = '${{ steps.installer.outputs.path }}'
-          $sha256 = '${{ steps.installer.outputs.sha256 }}'
-          $notes = "WindexBar $version installer release.`n`nSHA256: $sha256"
-
-          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
-          $releaseExists = $LASTEXITCODE -eq 0
-
-          if ($releaseExists) {
-            gh release upload $tag "$installer#WindexBarSetup.exe" --repo $env:GITHUB_REPOSITORY --clobber
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-            gh release edit $tag --repo $env:GITHUB_REPOSITORY --title "WindexBar $version" --notes $notes
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          } else {
-            gh release create $tag "$installer#WindexBarSetup.exe" --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "WindexBar $version" --notes $notes
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
