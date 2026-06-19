@@ -16,6 +16,14 @@ public sealed class SettingsStore
 
     public ProviderConfig Codex => Config.GetProviderConfig(UsageProvider.Codex);
 
+    public event EventHandler? Changed;
+
+    public void Update(Action<WindexBarConfig> mutate)
+    {
+        mutate(Config);
+        Save();
+    }
+
     public void UpdateCodex(Action<ProviderConfig> mutate)
     {
         var codex = Config.GetProviderConfig(UsageProvider.Codex);
@@ -24,7 +32,17 @@ public sealed class SettingsStore
         Save();
     }
 
-    public void Reload() => Config = _store.LoadOrCreateDefault();
+    public void Reload()
+    {
+        Config = _store.LoadOrCreateDefault();
+        OnChanged();
+    }
 
-    public void Save() => _store.Save(Config);
+    public void Save()
+    {
+        _store.Save(Config);
+        OnChanged();
+    }
+
+    private void OnChanged() => Changed?.Invoke(this, EventArgs.Empty);
 }

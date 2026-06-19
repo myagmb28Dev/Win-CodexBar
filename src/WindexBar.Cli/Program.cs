@@ -1,6 +1,6 @@
-using System.Globalization;
 using System.Text.Json;
 using WindexBar.Core.Models;
+using WindexBar.Core.Formatting;
 using WindexBar.Core.Config;
 using WindexBar.Core.Refresh;
 
@@ -64,7 +64,7 @@ else
 
     if (payload.TokenUsage is not null)
     {
-        Console.WriteLine($"  Tokens:  {FormatTokenUsage(payload.TokenUsage)}");
+        Console.WriteLine($"  Tokens:  {FormatTokenUsage(payload.TokenUsage, settings.Config.Language)}");
     }
 
     if (!string.IsNullOrWhiteSpace(payload.Error))
@@ -104,42 +104,27 @@ static string? OptionValue(string[] args, string name)
 
 static string Format(double? percent) => percent is null ? "unknown" : $"{percent:0.#}%";
 
-static string FormatTokenUsage(TokenUsageSnapshot tokenUsage)
+static string FormatTokenUsage(TokenUsageSnapshot tokenUsage, string language)
 {
     var values = new List<string>();
     var current = tokenUsage.Last ?? tokenUsage.Total;
     if (current is not null && tokenUsage.ModelContextWindow is { } window)
     {
-        values.Add($"context {FormatTokenCount(current.TotalTokens)} / {FormatTokenCount(window)}");
+        values.Add($"context {TokenCountFormatter.Format(current.TotalTokens, language)} / {TokenCountFormatter.Format(window, language)}");
     }
     else if (current is not null)
     {
-        values.Add($"context {FormatTokenCount(current.TotalTokens)}");
+        values.Add($"context {TokenCountFormatter.Format(current.TotalTokens, language)}");
     }
 
     if (tokenUsage.Total is not null)
     {
-        values.Add($"session total {FormatTokenCount(tokenUsage.Total.TotalTokens)}");
+        values.Add($"session total {TokenCountFormatter.Format(tokenUsage.Total.TotalTokens, language)}");
     }
 
     return values.Count == 0 ? "unknown" : string.Join(", ", values);
 }
 
-static string FormatTokenCount(long tokens)
-{
-    var magnitude = Math.Abs(tokens);
-    if (magnitude >= 1_000_000)
-    {
-        return (tokens / 1_000_000d).ToString("0.#", CultureInfo.InvariantCulture) + "M";
-    }
-
-    if (magnitude >= 1_000)
-    {
-        return (tokens / 1_000d).ToString("0.#", CultureInfo.InvariantCulture) + "K";
-    }
-
-    return tokens.ToString(CultureInfo.InvariantCulture);
-}
 
 static JsonSerializerOptions JsonOptions() => new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
@@ -178,5 +163,3 @@ internal sealed record ProviderPayload(
     string? AccountEmail,
     string? Plan,
     string? Error);
-
-
