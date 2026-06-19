@@ -5,10 +5,11 @@ namespace WindexBar.Core.Config;
 
 public sealed class WindexBarConfig
 {
-    public const int CurrentVersion = 2;
+    public const int CurrentVersion = 3;
     public const int MinRefreshIntervalSeconds = 1;
     public const int DefaultRefreshIntervalSeconds = 30;
     public const int MaxRefreshIntervalSeconds = 3600;
+    public const string DefaultLanguage = "en";
 
     [JsonPropertyName("version")]
     public int Version { get; set; } = CurrentVersion;
@@ -19,11 +20,15 @@ public sealed class WindexBarConfig
     [JsonPropertyName("clickThroughHud")]
     public bool ClickThroughHud { get; set; }
 
+    [JsonPropertyName("language")]
+    public string Language { get; set; } = DefaultLanguage;
+
     public static WindexBarConfig Default() => new();
 
     public WindexBarConfig Normalized()
     {
         Version = CurrentVersion;
+        Language = NormalizeLanguage(Language);
 
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var normalized = new List<ProviderConfig>();
@@ -45,6 +50,14 @@ public sealed class WindexBarConfig
         Providers = normalized;
         return this;
     }
+
+    public static string NormalizeLanguage(string? language) =>
+        language?.Trim().ToLowerInvariant() switch
+        {
+            "ko" or "ko-kr" or "korean" or "\uD55C\uAD6D\uC5B4" => "ko",
+            "en" or "en-us" or "english" => "en",
+            _ => DefaultLanguage
+        };
 
     public ProviderConfig GetProviderConfig(UsageProvider provider)
     {
@@ -93,4 +106,3 @@ public sealed class ProviderConfig
         return this;
     }
 }
-

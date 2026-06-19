@@ -1,5 +1,6 @@
 using System.Globalization;
 using WindexBar.Core.Config;
+using WindexBar.Core.Formatting;
 using WindexBar.Core.Models;
 using WindexBar.Core.Refresh;
 using Microsoft.UI.Dispatching;
@@ -36,6 +37,7 @@ public sealed class TrayIconService : IDisposable
         _notifyIcon.MouseDoubleClick += OnMouseDoubleClick;
         _notifyIcon.DoubleClick += OnDoubleClick;
         _usageStore.Changed += OnUsageChanged;
+        _settingsStore.Changed += OnSettingsChanged;
         UpdateTooltip();
     }
 
@@ -110,9 +112,9 @@ public sealed class TrayIconService : IDisposable
     private Forms.ContextMenuStrip BuildMenu()
     {
         var menu = new Forms.ContextMenuStrip();
-        menu.Items.Add("Settings", null, (_, _) => _dispatcher.TryEnqueue(ShowSettingsWindow));
+        menu.Items.Add(Text("Settings", "\uC124\uC815"), null, (_, _) => _dispatcher.TryEnqueue(ShowSettingsWindow));
         menu.Items.Add(new Forms.ToolStripSeparator());
-        menu.Items.Add("Quit", null, (_, _) => _dispatcher.TryEnqueue(App.Current.Shutdown));
+        menu.Items.Add(Text("Quit", "\uC885\uB8CC"), null, (_, _) => _dispatcher.TryEnqueue(App.Current.Shutdown));
         return menu;
     }
 
@@ -142,13 +144,27 @@ public sealed class TrayIconService : IDisposable
         _dispatcher.TryEnqueue(UpdateTooltip);
     }
 
-    private void UpdateTooltip()
+    private void OnSettingsChanged(object? sender, EventArgs args)
     {
-        _notifyIcon.Text = TooltipText(_usageStore.Snapshot, _usageStore.Credits, _uiError ?? _usageStore.LastError);
+        _dispatcher.TryEnqueue(() =>
+        {
+            RebuildMenu();
+            UpdateTooltip();
+        });
     }
 
-    private static string TooltipText(UsageSnapshot? snapshot, CreditsSnapshot? credits, string? error)
+    private void UpdateTooltip()
     {
+        _notifyIcon.Text = TooltipText(
+            _usageStore.Snapshot,
+            _usageStore.Credits,
+            _uiError ?? _usageStore.LastError,
+            _settingsStore.Config.Language);
+    }
+
+    private static string TooltipText(UsageSnapshot? snapshot, CreditsSnapshot? credits, string? error, string language)
+    {
+        var isKorean = IsKorean(language);
         if (!string.IsNullOrWhiteSpace(error) && snapshot is null)
         {
             return TrimTooltip($"WindexBar - {error}");
@@ -156,30 +172,53 @@ public sealed class TrayIconService : IDisposable
 
         if (snapshot?.Primary is null)
         {
-            var tokenOnlyText = TooltipTokenText(snapshot?.TokenUsage);
+            var tokenOnlyText = TooltipTokenText(snapshot?.TokenUsage, language);
             return tokenOnlyText is null
-                ? "WindexBar - Codex usage unknown"
-                : TrimTooltip($"WindexBar - tokens {tokenOnlyText}");
+                ? TrimTooltip(isKorean ? "WindexBar - Codex \uC0AC\uC6A9\uB7C9 \uC54C \uC218 \uC5C6\uC74C" : "WindexBar - Codex usage unknown")
+                : TrimTooltip(isKorean ? $"WindexBar - \uD1A0\uD070 {tokenOnlyText}" : $"WindexBar - tokens {tokenOnlyText}");
         }
 
-        var creditsText = credits is null ? string.Empty : $", credits {credits.Remaining:0.##}";
-        var tokenText = TooltipTokenText(snapshot.TokenUsage);
-        var tokens = tokenText is null ? string.Empty : $", tokens {tokenText}";
-        return TrimTooltip($"WindexBar - session {snapshot.Primary.RemainingPercent:0.#}% left{creditsText}{tokens}");
+        var creditsText = credits is null
+            ? string.Empty
+            : isKorean ? $", \uD06C\uB808\uB527 {credits.Remaining:0.##}" : $", credits {credits.Remaining:0.##}";
+        var tokenText = TooltipTokenText(snapshot.TokenUsage, language);
+        var tokens = tokenText is null
+            ? string.Empty
+            : isKorean ? $", \uD1A0\uD070 {tokenText}" : $", tokens {tokenText}";
+        return TrimTooltip(isKorean
+            ? $"WindexBar - \uC138\uC158 {snapshot.Primary.RemainingPercent:0.#}% \uB0A8\uC74C{creditsText}{tokens}"
+            : $"WindexBar - session {snapshot.Primary.RemainingPercent:0.#}% left{creditsText}{tokens}");
     }
+
+    private void RebuildMenu()
+    {
+        var oldMenu = _notifyIcon.ContextMenuStrip;
+        _notifyIcon.ContextMenuStrip = BuildMenu();
+        oldMenu?.Dispose();
+    }
+
+    private string Text(string english, string korean) => IsKorean(_settingsStore.Config.Language) ? korean : english;
+
+    private static bool IsKorean(string? language) => WindexBarConfig.NormalizeLanguage(language) == "ko";
 
     private static string TrimTooltip(string text) => text.Length <= 63 ? text : text[..63];
 
-    private static string? TooltipTokenText(TokenUsageSnapshot? tokenUsage)
+    private static string? TooltipTokenText(TokenUsageSnapshot? tokenUsage, string language)
     {
         var contextPercent = TokenContextPercent(tokenUsage);
         if (contextPercent is not null)
         {
-            return $"ctx {contextPercent.Value.ToString("0.#", CultureInfo.InvariantCulture)}%";
+            return IsKorean(language)
+                ? $"\uCEE8\uD14D\uC2A4\uD2B8 {contextPercent.Value.ToString("0.#", CultureInfo.InvariantCulture)}%"
+                : $"ctx {contextPercent.Value.ToString("0.#", CultureInfo.InvariantCulture)}%";
         }
 
         var sessionTokens = tokenUsage?.Total?.TotalTokens;
-        return sessionTokens is null ? null : $"session {FormatTokenCount(sessionTokens.Value)}";
+        return sessionTokens is null
+            ? null
+            : IsKorean(language)
+                ? $"\uC138\uC158 {TokenCountFormatter.Format(sessionTokens.Value, language)}"
+                : $"session {TokenCountFormatter.Format(sessionTokens.Value, language)}";
     }
 
     private static double? TokenContextPercent(TokenUsageSnapshot? tokenUsage)
@@ -191,22 +230,6 @@ public sealed class TrayIconService : IDisposable
         }
 
         return Math.Clamp(current.TotalTokens * 100d / contextWindow, 0, 100);
-    }
-
-    private static string FormatTokenCount(long tokens)
-    {
-        var magnitude = Math.Abs(tokens);
-        if (magnitude >= 1_000_000)
-        {
-            return (tokens / 1_000_000d).ToString("0.#", CultureInfo.InvariantCulture) + "M";
-        }
-
-        if (magnitude >= 1_000)
-        {
-            return (tokens / 1_000d).ToString("0.#", CultureInfo.InvariantCulture) + "K";
-        }
-
-        return tokens.ToString(CultureInfo.InvariantCulture);
     }
 
     private static Drawing.Icon LoadIcon()
@@ -249,6 +272,7 @@ public sealed class TrayIconService : IDisposable
 
         _disposed = true;
         _usageStore.Changed -= OnUsageChanged;
+        _settingsStore.Changed -= OnSettingsChanged;
         _notifyIcon.MouseClick -= OnMouseClick;
         _notifyIcon.MouseDoubleClick -= OnMouseDoubleClick;
         _notifyIcon.DoubleClick -= OnDoubleClick;

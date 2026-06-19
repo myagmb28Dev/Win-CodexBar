@@ -1,5 +1,6 @@
 using WindexBar.Core.Config;
 using WindexBar.Core.Models;
+using WindexBar.Core.Formatting;
 using WindexBar.Core.Providers;
 using WindexBar.Core.Providers.Codex;
 using WindexBar.Core.Refresh;
@@ -319,6 +320,7 @@ public sealed class ConfigTests
         Assert.False(reloaded.GetProviderConfig(UsageProvider.Codex).Enabled);
         Assert.Equal(WindexBarConfig.DefaultRefreshIntervalSeconds, reloaded.GetProviderConfig(UsageProvider.Codex).RefreshIntervalSeconds);
         Assert.False(reloaded.ClickThroughHud);
+        Assert.Equal(WindexBarConfig.DefaultLanguage, reloaded.Language);
     }
 
     [Fact]
@@ -356,6 +358,54 @@ public sealed class ConfigTests
         var reloaded = store.LoadOrCreateDefault();
 
         Assert.Equal(5, reloaded.GetProviderConfig(UsageProvider.Codex).RefreshIntervalSeconds);
+    }
+
+    [Fact]
+    public void PreservesSavedLanguage()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "config.json");
+        var store = new WindexBarConfigStore(path);
+        var config = store.LoadOrCreateDefault();
+        config.Language = "ko";
+        store.Save(config);
+
+        var reloaded = store.LoadOrCreateDefault();
+
+        Assert.Equal("ko", reloaded.Language);
+    }
+
+    [Fact]
+    public void NormalizesSavedLanguage()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "config.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, """
+        {
+          "version": 1,
+          "language": "ko-KR",
+          "providers": [
+            { "id": "codex", "enabled": true, "source": "cli" }
+          ]
+        }
+        """);
+        var store = new WindexBarConfigStore(path);
+
+        var config = store.LoadOrCreateDefault();
+
+        Assert.Equal("ko", config.Language);
+    }
+}
+
+public sealed class TokenCountFormatterTests
+{
+    [Theory]
+    [InlineData(161_000, "ko", "16\uB9CC 1\uCC9C")]
+    [InlineData(258_400, "ko", "25\uB9CC 8\uCC9C")]
+    [InlineData(1_610_000, "ko", "161\uB9CC")]
+    [InlineData(161_000, "en", "161K")]
+    public void FormatsTokenCountsForLanguage(long tokens, string language, string expected)
+    {
+        Assert.Equal(expected, TokenCountFormatter.Format(tokens, language));
     }
 }
 

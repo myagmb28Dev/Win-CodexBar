@@ -1,5 +1,5 @@
-using System.Globalization;
 using WindexBar.Core.Config;
+using WindexBar.Core.Formatting;
 using WindexBar.Core.Models;
 using WindexBar.Core.Refresh;
 using Microsoft.UI.Dispatching;
@@ -19,7 +19,7 @@ public sealed partial class MainWindow : Window
     private const double HudClientWidth = 265;
     private const double HudClientHeight = 300;
     private const double SettingsClientWidth = HudClientWidth;
-    private const double SettingsClientHeight = 152;
+    private const double SettingsClientHeight = 198;
     private const double KeyboardScrollStep = 36;
 
     private readonly UsageStore _usageStore;
@@ -61,12 +61,31 @@ public sealed partial class MainWindow : Window
     private TextBlock CreditsText = null!;
     private TextBlock AccountText = null!;
     private TextBlock ErrorText = null!;
+    private TextBlock CurrentWindowLabelText = null!;
+    private TextBlock WeeklyWindowLabelText = null!;
+    private TextBlock TokenWindowLabelText = null!;
+    private TextBlock CreditsLabelText = null!;
+    private TextBlock AccountLabelText = null!;
+    private TextBlock SettingsTitleText = null!;
+    private TextBlock RefreshIntervalLabelText = null!;
+    private TextBlock SecondsLabelText = null!;
+    private TextBlock LanguageLabelText = null!;
+    private Button SettingsButton = null!;
+    private Button QuitButton = null!;
+    private Button CancelSettingsButton = null!;
+    private Button SaveSettingsButton = null!;
     private TextBox RefreshIntervalSecondsTextBox = null!;
+    private ComboBox LanguageComboBox = null!;
 
     public MainWindow(UsageStore usageStore, SettingsStore settingsStore)
     {
         InitializeComponent();
+        _usageStore = usageStore;
+        _settingsStore = settingsStore;
+        _dispatcher = WinUiDispatcherQueue.GetForCurrentThread();
+
         BuildLayout();
+        ApplyLanguage();
         ConfigureCompactWindow();
         RootLayout.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(OnModelNavigationKeyDown), true);
         RootLayout.PointerPressed += (_, _) =>
@@ -80,10 +99,8 @@ public sealed partial class MainWindow : Window
             ResizeForCurrentView();
         };
 
-        _usageStore = usageStore;
-        _settingsStore = settingsStore;
-        _dispatcher = WinUiDispatcherQueue.GetForCurrentThread();
         _usageStore.Changed += OnUsageChanged;
+        _settingsStore.Changed += OnSettingsChanged;
 
         _barAnimationTimer.Interval = TimeSpan.FromMilliseconds(33);
         _barAnimationTimer.Tick += (_, _) => AnimateProgressBars();
@@ -92,6 +109,7 @@ public sealed partial class MainWindow : Window
         Closed += (_, _) =>
         {
             _usageStore.Changed -= OnUsageChanged;
+            _settingsStore.Changed -= OnSettingsChanged;
             _barAnimationTimer.Stop();
         };
 
@@ -219,12 +237,12 @@ public sealed partial class MainWindow : Window
         Grid.SetRow(ModelContentPanel, 2);
         hudContent.Children.Add(ModelContentPanel);
 
-        AddWindowSection(ModelContentPanel, 0, "Current", out CurrentWindowPercentText, out CurrentWindowTrackRoot, out CurrentWindowFillBar, out CurrentWindowSweepBar, out CurrentWindowText);
-        AddWindowSection(ModelContentPanel, 3, "Weekly", out WeeklyWindowPercentText, out WeeklyWindowTrackRoot, out WeeklyWindowFillBar, out WeeklyWindowSweepBar, out WeeklyWindowText);
-        AddWindowSection(ModelContentPanel, 6, "Tokens", out TokenWindowPercentText, out TokenWindowTrackRoot, out TokenWindowFillBar, out TokenWindowSweepBar, out TokenWindowText);
+        AddWindowSection(ModelContentPanel, 0, "Current", out CurrentWindowLabelText, out CurrentWindowPercentText, out CurrentWindowTrackRoot, out CurrentWindowFillBar, out CurrentWindowSweepBar, out CurrentWindowText);
+        AddWindowSection(ModelContentPanel, 3, "Weekly", out WeeklyWindowLabelText, out WeeklyWindowPercentText, out WeeklyWindowTrackRoot, out WeeklyWindowFillBar, out WeeklyWindowSweepBar, out WeeklyWindowText);
+        AddWindowSection(ModelContentPanel, 6, "Tokens", out TokenWindowLabelText, out TokenWindowPercentText, out TokenWindowTrackRoot, out TokenWindowFillBar, out TokenWindowSweepBar, out TokenWindowText);
 
-        CreditsText = AddLabelValueRow(hudContent, 3, "Credits");
-        AccountText = AddLabelValueRow(hudContent, 4, "Account");
+        CreditsText = AddLabelValueRow(hudContent, 3, "Credits", out CreditsLabelText);
+        AccountText = AddLabelValueRow(hudContent, 4, "Account", out AccountLabelText);
 
         ErrorText = new TextBlock
         {
@@ -243,12 +261,12 @@ public sealed partial class MainWindow : Window
         };
         Grid.SetRow(hudButtons, 1);
         hudGrid.Children.Add(hudButtons);
-        var settingsButton = new Button { Content = "Settings" };
-        settingsButton.Click += SettingsButton_Click;
-        var quitButton = new Button { Content = "Quit" };
-        quitButton.Click += QuitButton_Click;
-        hudButtons.Children.Add(settingsButton);
-        hudButtons.Children.Add(quitButton);
+        SettingsButton = new Button { Content = "Settings" };
+        SettingsButton.Click += SettingsButton_Click;
+        QuitButton = new Button { Content = "Quit" };
+        QuitButton.Click += QuitButton_Click;
+        hudButtons.Children.Add(SettingsButton);
+        hudButtons.Children.Add(QuitButton);
 
         SettingsView = new Border
         {
@@ -283,6 +301,7 @@ public sealed partial class MainWindow : Window
         Grid root,
         int row,
         string label,
+        out TextBlock labelText,
         out TextBlock percentText,
         out Grid trackRoot,
         out Border fillBar,
@@ -295,12 +314,13 @@ public sealed partial class MainWindow : Window
         Grid.SetRow(header, row);
         root.Children.Add(header);
 
-        header.Children.Add(new TextBlock
+        labelText = new TextBlock
         {
             Text = label,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             Foreground = Brush(0xFF, 0xED, 0xE7, 0xFF)
-        });
+        };
+        header.Children.Add(labelText);
 
         percentText = new TextBlock { FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
         Grid.SetColumn(percentText, 1);
@@ -341,7 +361,7 @@ public sealed partial class MainWindow : Window
         root.Children.Add(detailText);
     }
 
-    private static TextBlock AddLabelValueRow(Grid root, int row, string label)
+    private static TextBlock AddLabelValueRow(Grid root, int row, string label, out TextBlock labelText)
     {
         var grid = new Grid { ColumnSpacing = 8 };
         if (row == 3)
@@ -354,11 +374,12 @@ public sealed partial class MainWindow : Window
         Grid.SetRow(grid, row);
         root.Children.Add(grid);
 
-        grid.Children.Add(new TextBlock
+        labelText = new TextBlock
         {
             Text = label,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
-        });
+        };
+        grid.Children.Add(labelText);
 
         var value = new TextBlock { TextWrapping = TextWrapping.Wrap };
         Grid.SetColumn(value, 1);
@@ -368,19 +389,20 @@ public sealed partial class MainWindow : Window
 
     private void BuildSettingsView()
     {
-        var grid = new Grid { RowSpacing = 12 };
+        var grid = new Grid { RowSpacing = 11 };
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         SettingsView.Child = grid;
 
-        var title = new TextBlock
+        SettingsTitleText = new TextBlock
         {
             Text = "Settings",
             FontSize = 20,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
         };
-        grid.Children.Add(title);
+        grid.Children.Add(SettingsTitleText);
 
         var intervalGrid = new Grid { ColumnSpacing = 8 };
         intervalGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -389,21 +411,44 @@ public sealed partial class MainWindow : Window
         Grid.SetRow(intervalGrid, 1);
         grid.Children.Add(intervalGrid);
 
-        intervalGrid.Children.Add(new TextBlock
+        RefreshIntervalLabelText = new TextBlock
         {
             Text = "Refresh interval",
             VerticalAlignment = VerticalAlignment.Center
-        });
+        };
+        intervalGrid.Children.Add(RefreshIntervalLabelText);
         RefreshIntervalSecondsTextBox = new TextBox { TextAlignment = TextAlignment.Right };
         Grid.SetColumn(RefreshIntervalSecondsTextBox, 1);
         intervalGrid.Children.Add(RefreshIntervalSecondsTextBox);
-        var secondsLabel = new TextBlock
+        SecondsLabelText = new TextBlock
         {
             Text = "s",
             VerticalAlignment = VerticalAlignment.Center
         };
-        Grid.SetColumn(secondsLabel, 2);
-        intervalGrid.Children.Add(secondsLabel);
+        Grid.SetColumn(SecondsLabelText, 2);
+        intervalGrid.Children.Add(SecondsLabelText);
+
+        var languageGrid = new Grid { ColumnSpacing = 8 };
+        languageGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        languageGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(124) });
+        Grid.SetRow(languageGrid, 2);
+        grid.Children.Add(languageGrid);
+
+        LanguageLabelText = new TextBlock
+        {
+            Text = "Language",
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        languageGrid.Children.Add(LanguageLabelText);
+        LanguageComboBox = new ComboBox
+        {
+            HorizontalAlignment = HorizontalAlignment.Right,
+            MinWidth = 124
+        };
+        LanguageComboBox.Items.Add(new ComboBoxItem { Content = "English", Tag = "en" });
+        LanguageComboBox.Items.Add(new ComboBoxItem { Content = "\uD55C\uAD6D\uC5B4", Tag = "ko" });
+        Grid.SetColumn(LanguageComboBox, 1);
+        languageGrid.Children.Add(LanguageComboBox);
 
         var buttons = new StackPanel
         {
@@ -411,14 +456,14 @@ public sealed partial class MainWindow : Window
             HorizontalAlignment = HorizontalAlignment.Right,
             Spacing = 6
         };
-        Grid.SetRow(buttons, 2);
+        Grid.SetRow(buttons, 3);
         grid.Children.Add(buttons);
-        var cancelButton = new Button { Content = "Cancel" };
-        cancelButton.Click += CancelSettingsButton_Click;
-        var saveButton = new Button { Content = "Save" };
-        saveButton.Click += SaveSettingsButton_Click;
-        buttons.Children.Add(cancelButton);
-        buttons.Children.Add(saveButton);
+        CancelSettingsButton = new Button { Content = "Cancel" };
+        CancelSettingsButton.Click += CancelSettingsButton_Click;
+        SaveSettingsButton = new Button { Content = "Save" };
+        SaveSettingsButton.Click += SaveSettingsButton_Click;
+        buttons.Children.Add(CancelSettingsButton);
+        buttons.Children.Add(SaveSettingsButton);
     }
 
     private static SolidColorBrush Brush(byte a, byte r, byte g, byte b) =>
@@ -426,9 +471,9 @@ public sealed partial class MainWindow : Window
 
     public void ShowHudView()
     {
-        Title = "WindexBar";
         SettingsView.Visibility = Visibility.Collapsed;
         HudView.Visibility = Visibility.Visible;
+        ApplyLanguage();
         ResizeForCurrentView();
         RootLayout.Focus(FocusState.Programmatic);
         UpdateState();
@@ -436,10 +481,11 @@ public sealed partial class MainWindow : Window
 
     public void ShowSettingsView()
     {
-        Title = "WindexBar Settings";
         RefreshIntervalSecondsTextBox.Text = _settingsStore.Codex.RefreshIntervalSeconds.ToString();
+        SelectLanguage(_settingsStore.Config.Language);
         HudView.Visibility = Visibility.Collapsed;
         SettingsView.Visibility = Visibility.Visible;
+        ApplyLanguage();
         ResizeForCurrentView();
         _modelUsages.Clear();
     }
@@ -539,6 +585,15 @@ public sealed partial class MainWindow : Window
         _dispatcher.TryEnqueue(UpdateState);
     }
 
+    private void OnSettingsChanged(object? sender, EventArgs args)
+    {
+        _dispatcher.TryEnqueue(() =>
+        {
+            ApplyLanguage();
+            UpdateState();
+        });
+    }
+
     private void OnModelNavigationKeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
     {
         if (HudView.Visibility != Visibility.Visible)
@@ -618,9 +673,12 @@ public sealed partial class MainWindow : Window
 
     private void SaveSettingsButton_Click(object sender, RoutedEventArgs args)
     {
-        _settingsStore.UpdateCodex(c =>
+        _settingsStore.Update(config =>
         {
-            c.RefreshIntervalSeconds = ReadRefreshIntervalSeconds();
+            var codex = config.GetProviderConfig(UsageProvider.Codex);
+            codex.RefreshIntervalSeconds = ReadRefreshIntervalSeconds();
+            config.SetProviderConfig(codex);
+            config.Language = ReadSelectedLanguage();
         });
         _usageStore.StartBackgroundRefresh();
         ShowHudView();
@@ -639,6 +697,57 @@ public sealed partial class MainWindow : Window
             WindexBarConfig.MaxRefreshIntervalSeconds);
     }
 
+    private string ReadSelectedLanguage()
+    {
+        if (LanguageComboBox.SelectedItem is ComboBoxItem { Tag: string language })
+        {
+            return WindexBarConfig.NormalizeLanguage(language);
+        }
+
+        return WindexBarConfig.DefaultLanguage;
+    }
+
+    private void SelectLanguage(string? language)
+    {
+        var normalized = WindexBarConfig.NormalizeLanguage(language);
+        foreach (var item in LanguageComboBox.Items.OfType<ComboBoxItem>())
+        {
+            if (item.Tag is string value && WindexBarConfig.NormalizeLanguage(value) == normalized)
+            {
+                LanguageComboBox.SelectedItem = item;
+                return;
+            }
+        }
+
+        LanguageComboBox.SelectedIndex = 0;
+    }
+
+    private void ApplyLanguage()
+    {
+        Title = SettingsView.Visibility == Visibility.Visible ? Text("WindexBar Settings", "WindexBar \uC124\uC815") : "WindexBar";
+        CurrentWindowLabelText.Text = Text("Current", "\uD604\uC7AC");
+        WeeklyWindowLabelText.Text = Text("Weekly", "\uC8FC\uAC04");
+        TokenWindowLabelText.Text = Text("Tokens", "\uD1A0\uD070");
+        CreditsLabelText.Text = Text("Credits", "\uD06C\uB808\uB527");
+        AccountLabelText.Text = Text("Account", "\uACC4\uC815");
+        SettingsButton.Content = Text("Settings", "\uC124\uC815");
+        QuitButton.Content = Text("Quit", "\uC885\uB8CC");
+        SettingsTitleText.Text = Text("Settings", "\uC124\uC815");
+        RefreshIntervalLabelText.Text = Text("Refresh interval", "\uC0C8\uB85C\uACE0\uCE68 \uAC04\uACA9");
+        SecondsLabelText.Text = Text("s", "\uCD08");
+        LanguageLabelText.Text = Text("Language", "\uC5B8\uC5B4");
+        CancelSettingsButton.Content = Text("Cancel", "\uCDE8\uC18C");
+        SaveSettingsButton.Content = Text("Save", "\uC800\uC7A5");
+    }
+
+    private string CurrentLanguage => WindexBarConfig.NormalizeLanguage(_settingsStore.Config.Language);
+
+    private bool IsKorean => CurrentLanguage == "ko";
+
+    private string Text(string english, string korean) => IsKorean ? korean : english;
+
+    private string UnknownText => Text("unknown", "\uC54C \uC218 \uC5C6\uC74C");
+
     private void QuitButton_Click(object sender, RoutedEventArgs args) => App.Current.Shutdown();
 
     private void UpdateState()
@@ -649,7 +758,9 @@ public sealed partial class MainWindow : Window
         var credits = _usageStore.Credits;
         var disabled = !_settingsStore.Codex.Enabled;
 
-        CreditsText.Text = credits is null ? "unknown" : $"{credits.Remaining:0.##} remaining";
+        CreditsText.Text = credits is null
+            ? UnknownText
+            : IsKorean ? $"{credits.Remaining:0.##} \uB0A8\uC74C" : $"{credits.Remaining:0.##} remaining";
         AccountText.Text = FormatIdentity(snapshot?.Identity);
         ErrorText.Text = string.IsNullOrWhiteSpace(_usageStore.LastError) ? string.Empty : _usageStore.LastError;
         var hudMeta = FormatHudMeta(snapshot, disabled);
@@ -715,7 +826,7 @@ public sealed partial class MainWindow : Window
         ModelPageText.Visibility = Visibility.Collapsed;
     }
 
-    private static void ApplyWindowView(TextBlock percentText, TextBlock detailText, RateWindow? window, out double targetValue)
+    private void ApplyWindowView(TextBlock percentText, TextBlock detailText, RateWindow? window, out double targetValue)
     {
         percentText.Text = FormatHudPercent(window);
         detailText.Text = FormatWindow(window);
@@ -840,56 +951,58 @@ public sealed partial class MainWindow : Window
     {
         if (disabled)
         {
-            return "Provider disabled";
+            return Text("Provider disabled", "\uC81C\uACF5\uC790 \uBE44\uD65C\uC131\uD654");
         }
 
         return string.IsNullOrWhiteSpace(_usageStore.LastError) ? string.Empty : _usageStore.LastError;
     }
 
-    private static string FormatHudPercent(RateWindow? window) =>
-        window is null ? "unknown" : $"{window.RemainingPercent:0.#}%";
+    private string FormatHudPercent(RateWindow? window) =>
+        window is null ? UnknownText : $"{window.RemainingPercent:0.#}%";
 
-    private static string FormatWindow(RateWindow? window)
+    private string FormatWindow(RateWindow? window)
     {
         if (window is null)
         {
-            return "unknown";
+            return UnknownText;
         }
 
-        var reset = window.ResetsAt is null ? string.Empty : $", resets {window.ResetDescription}";
-        return $"Used {window.UsedPercent:0.#}%{reset}";
+        var reset = window.ResetsAt is null
+            ? string.Empty
+            : IsKorean ? $", \uCD08\uAE30\uD654 {window.ResetDescription}" : $", resets {window.ResetDescription}";
+        return IsKorean ? $"{window.UsedPercent:0.#}% \uC0AC\uC6A9{reset}" : $"Used {window.UsedPercent:0.#}%{reset}";
     }
 
-    private static string FormatTokenPercent(TokenUsageSnapshot? tokenUsage)
+    private string FormatTokenPercent(TokenUsageSnapshot? tokenUsage)
     {
         var percent = TokenContextPercent(tokenUsage);
-        return percent is null ? "unknown" : $"{percent.Value:0.#}%";
+        return percent is null ? UnknownText : $"{percent.Value:0.#}%";
     }
 
-    private static string FormatTokenUsage(TokenUsageSnapshot? tokenUsage)
+    private string FormatTokenUsage(TokenUsageSnapshot? tokenUsage)
     {
         if (tokenUsage is null)
         {
-            return "unknown";
+            return UnknownText;
         }
 
         var values = new List<string>();
         var current = tokenUsage.Last ?? tokenUsage.Total;
         if (current is not null && tokenUsage.ModelContextWindow is { } contextWindow)
         {
-            values.Add($"Context: {FormatTokenCount(current.TotalTokens)} / {FormatTokenCount(contextWindow)}");
+            values.Add($"{Text("Context", "\uCEE8\uD14D\uC2A4\uD2B8")}: {TokenCountFormatter.Format(current.TotalTokens, CurrentLanguage)} / {TokenCountFormatter.Format(contextWindow, CurrentLanguage)}");
         }
         else if (current is not null)
         {
-            values.Add($"Context: {FormatTokenCount(current.TotalTokens)}");
+            values.Add($"{Text("Context", "\uCEE8\uD14D\uC2A4\uD2B8")}: {TokenCountFormatter.Format(current.TotalTokens, CurrentLanguage)}");
         }
 
         if (tokenUsage.Total is not null)
         {
-            values.Add($"Session total: {FormatTokenCount(tokenUsage.Total.TotalTokens)}");
+            values.Add($"{Text("Session total", "\uC138\uC158 \uD569\uACC4")}: {TokenCountFormatter.Format(tokenUsage.Total.TotalTokens, CurrentLanguage)}");
         }
 
-        return values.Count == 0 ? "unknown" : string.Join(Environment.NewLine, values);
+        return values.Count == 0 ? UnknownText : string.Join(Environment.NewLine, values);
     }
 
     private static double? TokenContextPercent(TokenUsageSnapshot? tokenUsage)
@@ -903,32 +1016,16 @@ public sealed partial class MainWindow : Window
         return Math.Clamp(current.TotalTokens * 100d / contextWindow, 0, 100);
     }
 
-    private static string FormatTokenCount(long tokens)
-    {
-        var magnitude = Math.Abs(tokens);
-        if (magnitude >= 1_000_000)
-        {
-            return (tokens / 1_000_000d).ToString("0.#", CultureInfo.InvariantCulture) + "M";
-        }
-
-        if (magnitude >= 1_000)
-        {
-            return (tokens / 1_000d).ToString("0.#", CultureInfo.InvariantCulture) + "K";
-        }
-
-        return tokens.ToString(CultureInfo.InvariantCulture);
-    }
-
-    private static string FormatIdentity(ProviderIdentitySnapshot? identity)
+    private string FormatIdentity(ProviderIdentitySnapshot? identity)
     {
         if (identity is null || (string.IsNullOrWhiteSpace(identity.AccountEmail) && string.IsNullOrWhiteSpace(identity.LoginMethod)))
         {
-            return "unknown";
+            return UnknownText;
         }
 
         if (string.IsNullOrWhiteSpace(identity.AccountEmail))
         {
-            return identity.LoginMethod ?? "unknown";
+            return identity.LoginMethod ?? UnknownText;
         }
 
         if (string.IsNullOrWhiteSpace(identity.LoginMethod))
