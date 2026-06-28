@@ -13,6 +13,7 @@ set "INSTALLER_DIR=%ROOT%artifacts\installer\%BUILD_STAMP%"
 set "INNO_OUTPUT_DIR=%TEMP%\WindexBarInstaller\%BUILD_STAMP%"
 set "ISCC="
 set "DOTNET_EXE=%ROOT%.dotnet\dotnet.exe"
+if not exist "%DOTNET_EXE%" if exist "%ProgramFiles%\dotnet\dotnet.exe" set "DOTNET_EXE=%ProgramFiles%\dotnet\dotnet.exe"
 if not exist "%DOTNET_EXE%" set "DOTNET_EXE=dotnet"
 
 if exist "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"

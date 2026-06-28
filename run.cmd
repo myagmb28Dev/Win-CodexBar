@@ -2,6 +2,8 @@
 setlocal
 pushd "%~dp0"
 set "DOTNET=.dotnet\dotnet.exe"
+if not exist "%DOTNET%" if exist "%ProgramFiles%\dotnet\dotnet.exe" set "DOTNET=%ProgramFiles%\dotnet\dotnet.exe"
+if not exist "%DOTNET%" set "DOTNET=dotnet"
 set "PROJECT=.\src\WindexBar.Windows"
 set "RUN_DIR=.\artifacts\run\win-x64"
 set "APP_EXE=%RUN_DIR%\WindexBar.Windows.exe"

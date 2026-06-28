@@ -14,7 +14,8 @@ public sealed record UsageSnapshot(
     ProviderIdentitySnapshot? Identity,
     IReadOnlyList<ModelUsageSnapshot>? Models = null,
     CodexModelSelection? ActiveModel = null,
-    TokenUsageSnapshot? TokenUsage = null)
+    TokenUsageSnapshot? TokenUsage = null,
+    RateLimitResetCreditsSnapshot? RateLimitResetCredits = null)
 {
     public bool HasRateLimitWindows =>
         Primary is not null
@@ -52,3 +53,5 @@ public sealed record CreditsSnapshot(double Remaining, IReadOnlyList<CreditEvent
 {
     public static CreditsSnapshot Empty(DateTimeOffset updatedAt) => new(0, Array.Empty<CreditEvent>(), updatedAt);
 }
+
+public sealed record RateLimitResetCreditsSnapshot(long AvailableCount, DateTimeOffset UpdatedAt);

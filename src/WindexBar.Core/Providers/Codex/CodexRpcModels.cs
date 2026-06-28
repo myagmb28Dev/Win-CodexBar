@@ -10,6 +10,9 @@ public sealed class RpcRateLimitsResponse
 
     [JsonPropertyName("rateLimitsByLimitId")]
     public Dictionary<string, RpcRateLimitSnapshot>? RateLimitsByLimitId { get; set; }
+
+    [JsonPropertyName("rateLimitResetCredits")]
+    public RpcRateLimitResetCreditsSummary? RateLimitResetCredits { get; set; }
 }
 
 public sealed class RpcRateLimitSnapshot
@@ -87,6 +90,12 @@ public sealed class RpcCreditsSnapshot
 
     [JsonPropertyName("balance")]
     public string? Balance { get; set; }
+}
+
+public sealed class RpcRateLimitResetCreditsSummary
+{
+    [JsonPropertyName("availableCount")]
+    public long AvailableCount { get; set; }
 }
 
 public sealed class RpcAccountResponse

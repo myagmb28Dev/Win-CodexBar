@@ -181,13 +181,18 @@ public sealed class TrayIconService : IDisposable
         var creditsText = credits is null
             ? string.Empty
             : isKorean ? $", \uD06C\uB808\uB527 {credits.Remaining:0.##}" : $", credits {credits.Remaining:0.##}";
+        var resetCreditsText = snapshot.RateLimitResetCredits is null
+            ? string.Empty
+            : isKorean
+                ? $", \uCD08\uAE30\uD654\uAD8C {snapshot.RateLimitResetCredits.AvailableCount:N0}"
+                : $", resets {snapshot.RateLimitResetCredits.AvailableCount:N0}";
         var tokenText = TooltipTokenText(snapshot.TokenUsage, language);
         var tokens = tokenText is null
             ? string.Empty
             : isKorean ? $", \uD1A0\uD070 {tokenText}" : $", tokens {tokenText}";
         return TrimTooltip(isKorean
-            ? $"WindexBar - \uC138\uC158 {snapshot.Primary.RemainingPercent:0.#}% \uB0A8\uC74C{creditsText}{tokens}"
-            : $"WindexBar - session {snapshot.Primary.RemainingPercent:0.#}% left{creditsText}{tokens}");
+            ? $"WindexBar - \uC138\uC158 {snapshot.Primary.RemainingPercent:0.#}% \uB0A8\uC74C{resetCreditsText}{creditsText}{tokens}"
+            : $"WindexBar - session {snapshot.Primary.RemainingPercent:0.#}% left{resetCreditsText}{creditsText}{tokens}");
     }
 
     private void RebuildMenu()

@@ -37,7 +37,14 @@ public static class CodexUsageMapper
     public static UsageSnapshot? MapUsage(RpcRateLimitsResponse response, RpcAccountResponse? account, DateTimeOffset now)
     {
         var buckets = EnumerateLimitBuckets(response.RateLimits, response.RateLimitsByLimitId).ToArray();
-        return MapUsageFromBuckets(response.RateLimits, buckets, account, now);
+        var usage = MapUsageFromBuckets(response.RateLimits, buckets, account, now);
+        var resetCredits = MapRateLimitResetCredits(response.RateLimitResetCredits, now);
+        if (usage is null)
+        {
+            return resetCredits is null ? null : new UsageSnapshot(null, null, null, now, null, RateLimitResetCredits: resetCredits);
+        }
+
+        return usage with { RateLimitResetCredits = resetCredits };
     }
 
     internal static UsageSnapshot WithMergedModels(UsageSnapshot usage, IReadOnlyList<ModelUsageSnapshot> additionalModels)
@@ -137,6 +144,15 @@ public static class CodexUsageMapper
             ? value
             : 0;
         return new CreditsSnapshot(remaining, Array.Empty<CreditEvent>(), now);
+    }
+
+    public static RateLimitResetCreditsSnapshot? MapRateLimitResetCredits(
+        RpcRateLimitResetCreditsSummary? resetCredits,
+        DateTimeOffset now)
+    {
+        return resetCredits is null
+            ? null
+            : new RateLimitResetCreditsSnapshot(Math.Max(0, resetCredits.AvailableCount), now);
     }
 
     public static RateWindow? MapWindow(RpcRateLimitWindow? window)

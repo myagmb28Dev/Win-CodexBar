@@ -42,6 +42,7 @@ var payload = new ProviderPayload(
     store.Snapshot?.Primary,
     store.Snapshot?.Secondary,
     store.Snapshot?.TokenUsage,
+    store.Snapshot?.RateLimitResetCredits,
     store.Credits?.Remaining,
     store.Snapshot?.Identity?.AccountEmail,
     store.Snapshot?.Identity?.LoginMethod,
@@ -55,8 +56,13 @@ else
 {
     Console.WriteLine("Codex");
     Console.WriteLine($"  Source: {payload.Source}");
-    Console.WriteLine($"  Session: {Format(payload.Primary?.RemainingPercent)} left");
-    Console.WriteLine($"  Weekly:  {Format(payload.Secondary?.RemainingPercent)} left");
+    Console.WriteLine($"  Session: {FormatWindow(payload.Primary)}");
+    Console.WriteLine($"  Weekly:  {FormatWindow(payload.Secondary)}");
+    if (payload.RateLimitResetCredits is not null)
+    {
+        Console.WriteLine($"  Limit resets: {payload.RateLimitResetCredits.AvailableCount:N0} available");
+    }
+
     if (payload.CreditsRemaining is not null)
     {
         Console.WriteLine($"  Credits: {payload.CreditsRemaining:0.##}");
@@ -79,7 +85,7 @@ static int WriteError(CliOutputPreferences output, string provider, string error
 {
     if (output.Json)
     {
-        Console.WriteLine(JsonSerializer.Serialize(new ProviderPayload(provider, "auto", null, null, null, null, null, null, null, error), JsonOptions()));
+        Console.WriteLine(JsonSerializer.Serialize(new ProviderPayload(provider, "auto", null, null, null, null, null, null, null, null, error), JsonOptions()));
     }
     else
     {
@@ -103,6 +109,46 @@ static string? OptionValue(string[] args, string name)
 }
 
 static string Format(double? percent) => percent is null ? "unknown" : $"{percent:0.#}%";
+
+static string FormatWindow(RateWindow? window)
+{
+    if (window is null)
+    {
+        return "unknown";
+    }
+
+    var reset = FormatReset(window.ResetsAt);
+    return reset is null
+        ? $"{Format(window.RemainingPercent)} left"
+        : $"{Format(window.RemainingPercent)} left, resets {reset}";
+}
+
+static string? FormatReset(DateTimeOffset? resetsAt)
+{
+    if (resetsAt is null)
+    {
+        return null;
+    }
+
+    var delta = resetsAt.Value - DateTimeOffset.Now;
+    if (delta.TotalSeconds <= 0)
+    {
+        return "now";
+    }
+
+    if (delta.TotalHours >= 24)
+    {
+        var days = delta.TotalDays >= 10 ? Math.Round(delta.TotalDays) : Math.Round(delta.TotalDays, 1);
+        return $"in {days:0.#}d";
+    }
+
+    if (delta.TotalHours >= 1)
+    {
+        return $"in {(int)Math.Round(delta.TotalHours)}h";
+    }
+
+    return $"in {Math.Max(1, (int)Math.Round(delta.TotalMinutes))}m";
+}
 
 static string FormatTokenUsage(TokenUsageSnapshot tokenUsage, string language)
 {
@@ -159,6 +205,7 @@ internal sealed record ProviderPayload(
     RateWindow? Primary,
     RateWindow? Secondary,
     TokenUsageSnapshot? TokenUsage,
+    RateLimitResetCreditsSnapshot? RateLimitResetCredits,
     double? CreditsRemaining,
     string? AccountEmail,
     string? Plan,

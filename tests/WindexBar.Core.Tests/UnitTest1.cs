@@ -23,7 +23,8 @@ public sealed class CodexRpcClientTests
                     secondary = new { usedPercent = 40.0, windowDurationMins = 10080, resetsAt = 1_800_100_000 },
                     credits = new { hasCredits = true, unlimited = false, balance = "123.5" },
                     planType = "plus"
-                }
+                },
+                rateLimitResetCredits = new { availableCount = 2 }
             }),
             OnRequest(3, new { account = new { type = "chatgpt", email = "me@example.com", planType = "team" } }));
 
@@ -31,7 +32,7 @@ public sealed class CodexRpcClientTests
         await client.InitializeAsync(CancellationToken.None);
         var limits = await client.FetchRateLimitsAsync(CancellationToken.None);
         var account = await client.FetchAccountAsync(CancellationToken.None);
-        var usage = CodexUsageMapper.MapUsage(limits.RateLimits, account, DateTimeOffset.UnixEpoch)!;
+        var usage = CodexUsageMapper.MapUsage(limits, account, DateTimeOffset.UnixEpoch)!;
         var credits = CodexUsageMapper.MapCredits(limits.RateLimits.Credits, DateTimeOffset.UnixEpoch)!;
 
         Assert.Equal(25, usage.Primary!.UsedPercent);
@@ -39,6 +40,7 @@ public sealed class CodexRpcClientTests
         Assert.Equal(300, usage.Primary.WindowMinutes);
         Assert.Equal("me@example.com", usage.Identity!.AccountEmail);
         Assert.Equal("team", usage.Identity.LoginMethod);
+        Assert.Equal(2, usage.RateLimitResetCredits!.AvailableCount);
         Assert.Equal(123.5, credits.Remaining, 3);
         Assert.Contains("initialized", transport.Writes[1], StringComparison.Ordinal);
     }
@@ -83,6 +85,24 @@ public sealed class MappingTests
         Assert.Equal(87.5, window!.RemainingPercent);
         Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1_800_000_000), window.ResetsAt);
         Assert.Equal(42, credits!.Remaining);
+    }
+
+    [Fact]
+    public void MapsRateLimitResetCredits()
+    {
+        var response = JsonSerializer.Deserialize<RpcRateLimitsResponse>(JsonSerializer.Serialize(new
+        {
+            rateLimits = new
+            {
+                primary = new { usedPercent = 12.0, windowDurationMins = 300, resetsAt = 1_800_000_000L }
+            },
+            rateLimitResetCredits = new { availableCount = 3L }
+        }))!;
+
+        var usage = CodexUsageMapper.MapUsage(response, null, DateTimeOffset.UnixEpoch)!;
+
+        Assert.Equal(3, usage.RateLimitResetCredits!.AvailableCount);
+        Assert.Equal(DateTimeOffset.UnixEpoch, usage.RateLimitResetCredits.UpdatedAt);
     }
 
     [Fact]

@@ -4,11 +4,7 @@ Codex 사용량 한도를 Windows 트레이에서 빠르게 확인하는 작은 
 
 ## 설치
 
-| 대상 | 방법 |
-| --- | --- |
-| 일반 사용자 | GitHub Release에서 `WindexBarSetup.exe`를 내려받아 실행 |
-| 터미널 사용자 | winget 등록 후 제공 예정 |
-| 소스 사용자 | 저장소 루트에서 `.\install.cmd` 실행 |
+GitHub Release에서 `WindexBarSetup.exe`를 내려받아 실행합니다.
 
 ## 사용
 
@@ -19,8 +15,18 @@ Codex 사용량 한도를 Windows 트레이에서 빠르게 확인하는 작은 
 
 ## 개발
 
-소스에서 바로 실행하려면:
+- SDK: `.NET SDK 10.0.301` (`global.json`)
+- 로컬 SDK 설치: [dotnet-install scripts](https://learn.microsoft.com/dotnet/core/tools/dotnet-install-script)
+- 로컬 SDK가 없으면 `run.cmd`와 `build-installer.cmd`는 시스템 설치 또는 PATH의 `dotnet`을 사용합니다.
+
+실행:
 
 ```powershell
 .\run.cmd
+```
+
+테스트:
+
+```powershell
+dotnet test .\tests\WindexBar.Core.Tests\WindexBar.Core.Tests.csproj -p:NuGetAudit=false
 ```

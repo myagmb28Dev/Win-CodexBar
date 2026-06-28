@@ -17,7 +17,7 @@ namespace WindexBar.Windows;
 public sealed partial class MainWindow : Window
 {
     private const double HudClientWidth = 265;
-    private const double HudClientHeight = 300;
+    private const double HudClientHeight = 318;
     private const double SettingsClientWidth = HudClientWidth;
     private const double SettingsClientHeight = 198;
     private const double KeyboardScrollStep = 36;
@@ -59,12 +59,14 @@ public sealed partial class MainWindow : Window
     private Border TokenWindowSweepBar = null!;
     private TextBlock TokenWindowText = null!;
     private TextBlock CreditsText = null!;
+    private TextBlock ResetCreditsText = null!;
     private TextBlock AccountText = null!;
     private TextBlock ErrorText = null!;
     private TextBlock CurrentWindowLabelText = null!;
     private TextBlock WeeklyWindowLabelText = null!;
     private TextBlock TokenWindowLabelText = null!;
     private TextBlock CreditsLabelText = null!;
+    private TextBlock ResetCreditsLabelText = null!;
     private TextBlock AccountLabelText = null!;
     private TextBlock SettingsTitleText = null!;
     private TextBlock RefreshIntervalLabelText = null!;
@@ -183,7 +185,7 @@ public sealed partial class MainWindow : Window
         hudGrid.Children.Add(HudScrollViewer);
 
         var hudContent = new Grid { RowSpacing = 8 };
-        for (var i = 0; i < 6; i++)
+        for (var i = 0; i < 7; i++)
         {
             hudContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         }
@@ -242,14 +244,15 @@ public sealed partial class MainWindow : Window
         AddWindowSection(ModelContentPanel, 6, "Tokens", out TokenWindowLabelText, out TokenWindowPercentText, out TokenWindowTrackRoot, out TokenWindowFillBar, out TokenWindowSweepBar, out TokenWindowText);
 
         CreditsText = AddLabelValueRow(hudContent, 3, "Credits", out CreditsLabelText);
-        AccountText = AddLabelValueRow(hudContent, 4, "Account", out AccountLabelText);
+        ResetCreditsText = AddLabelValueRow(hudContent, 4, "Reset credits", out ResetCreditsLabelText);
+        AccountText = AddLabelValueRow(hudContent, 5, "Account", out AccountLabelText);
 
         ErrorText = new TextBlock
         {
             Foreground = Brush(0xFF, 0xFF, 0x5F, 0x57),
             TextWrapping = TextWrapping.Wrap
         };
-        Grid.SetRow(ErrorText, 5);
+        Grid.SetRow(ErrorText, 6);
         hudContent.Children.Add(ErrorText);
 
         var hudButtons = new StackPanel
@@ -369,7 +372,7 @@ public sealed partial class MainWindow : Window
             grid.Margin = new Thickness(0, 4, 0, 0);
         }
 
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(64) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(86) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         Grid.SetRow(grid, row);
         root.Children.Add(grid);
@@ -729,6 +732,7 @@ public sealed partial class MainWindow : Window
         WeeklyWindowLabelText.Text = Text("Weekly", "\uC8FC\uAC04");
         TokenWindowLabelText.Text = Text("Tokens", "\uD1A0\uD070");
         CreditsLabelText.Text = Text("Credits", "\uD06C\uB808\uB527");
+        ResetCreditsLabelText.Text = Text("Reset credits", "\uCD08\uAE30\uD654\uAD8C");
         AccountLabelText.Text = Text("Account", "\uACC4\uC815");
         SettingsButton.Content = Text("Settings", "\uC124\uC815");
         QuitButton.Content = Text("Quit", "\uC885\uB8CC");
@@ -761,6 +765,7 @@ public sealed partial class MainWindow : Window
         CreditsText.Text = credits is null
             ? UnknownText
             : IsKorean ? $"{credits.Remaining:0.##} \uB0A8\uC74C" : $"{credits.Remaining:0.##} remaining";
+        ResetCreditsText.Text = FormatRateLimitResetCredits(snapshot?.RateLimitResetCredits);
         AccountText.Text = FormatIdentity(snapshot?.Identity);
         ErrorText.Text = string.IsNullOrWhiteSpace(_usageStore.LastError) ? string.Empty : _usageStore.LastError;
         var hudMeta = FormatHudMeta(snapshot, disabled);
@@ -969,8 +974,44 @@ public sealed partial class MainWindow : Window
 
         var reset = window.ResetsAt is null
             ? string.Empty
-            : IsKorean ? $", \uCD08\uAE30\uD654 {window.ResetDescription}" : $", resets {window.ResetDescription}";
+            : IsKorean ? $", \uCD08\uAE30\uD654 {FormatResetDescription(window.ResetsAt.Value)}" : $", resets {FormatResetDescription(window.ResetsAt.Value)}";
         return IsKorean ? $"{window.UsedPercent:0.#}% \uC0AC\uC6A9{reset}" : $"Used {window.UsedPercent:0.#}%{reset}";
+    }
+
+    private string FormatRateLimitResetCredits(RateLimitResetCreditsSnapshot? resetCredits)
+    {
+        if (resetCredits is null)
+        {
+            return UnknownText;
+        }
+
+        return IsKorean
+            ? $"{resetCredits.AvailableCount:N0}\uAC1C \uB0A8\uC74C"
+            : $"{resetCredits.AvailableCount:N0} available";
+    }
+
+    private string FormatResetDescription(DateTimeOffset resetsAt)
+    {
+        var delta = resetsAt - DateTimeOffset.Now;
+        if (delta.TotalSeconds <= 0)
+        {
+            return Text("now", "\uC9C0\uAE08");
+        }
+
+        if (delta.TotalHours >= 24)
+        {
+            var days = delta.TotalDays >= 10 ? Math.Round(delta.TotalDays) : Math.Round(delta.TotalDays, 1);
+            return IsKorean ? $"{days:0.#}\uC77C \uD6C4" : $"in {days:0.#}d";
+        }
+
+        if (delta.TotalHours >= 1)
+        {
+            var hours = Math.Max(1, (int)Math.Round(delta.TotalHours));
+            return IsKorean ? $"{hours}\uC2DC\uAC04 \uD6C4" : $"in {hours}h";
+        }
+
+        var minutes = Math.Max(1, (int)Math.Round(delta.TotalMinutes));
+        return IsKorean ? $"{minutes}\uBD84 \uD6C4" : $"in {minutes}m";
     }
 
     private string FormatTokenPercent(TokenUsageSnapshot? tokenUsage)
