@@ -15,8 +15,8 @@ WindexBar is a small Windows tray app for quickly checking Codex usage and statu
 - Settings for refresh interval, language, and the Alt+O show/hide shortcut.
 
 Bank-reset expiration estimates are local best-effort estimates.
-They are calculated only for banked reset credits observed since v.1.2.
-Bank-resets that existed prior to v.1.2 may show an unknown expiry
+They are calculated only for banked reset credits granted since v.1.2.
+Credits that existed prior to this update may show an unknown expiry.
 
 ## Install
 
