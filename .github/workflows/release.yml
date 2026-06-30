@@ -131,15 +131,27 @@ jobs:
           $tag = '${{ steps.release.outputs.tag }}'
           $version = '${{ steps.release.outputs.version }}'
           $installer = '${{ steps.installer.outputs.path }}'
+          $notesPath = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+
+          $body = gh api "repos/$env:GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$tag" --jq .body
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $body = $body -replace '(?ms)\r?\n*\*\*Full Changelog\*\*:.*$', ''
+          $body = $body.TrimEnd()
+          if ([string]::IsNullOrWhiteSpace($body)) {
+            $body = "WindexBar $version"
+          }
+
+          Set-Content -LiteralPath $notesPath -Value $body -NoNewline
 
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           $releaseExists = $LASTEXITCODE -eq 0
 
           if ($releaseExists) {
-            gh release edit $tag --repo $env:GITHUB_REPOSITORY --title "WindexBar $version" --draft=false
+            gh release edit $tag --repo $env:GITHUB_REPOSITORY --title "WindexBar $version" --notes-file "$notesPath" --draft=false
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           } else {
-            gh release create $tag --repo $env:GITHUB_REPOSITORY --verify-tag --title "WindexBar $version" --generate-notes
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --verify-tag --title "WindexBar $version" --notes-file "$notesPath"
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 

@@ -26,11 +26,32 @@ Download and run `WindexBarSetup.exe` from the GitHub Releases page.
 
 - Codex CLI: WindexBar reads Codex usage through `codex app-server`, so the `codex` command must be available on `PATH`.
 - Install Codex CLI: [Codex CLI setup](https://developers.openai.com/codex/cli)
-  - Windows PowerShell: `powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"`
-  - Node/npm: `npm install -g @openai/codex`
-  - Bun: `bun install -g @openai/codex`
-  - Homebrew: `brew install --cask codex`
-  - Other downloads: [Codex releases](https://github.com/openai/codex/releases/latest)
+
+Windows PowerShell:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"
+```
+
+Node/npm:
+
+```shell
+npm install -g @openai/codex
+```
+
+Bun:
+
+```shell
+bun install -g @openai/codex
+```
+
+Homebrew:
+
+```shell
+brew install --cask codex
+```
+
+Other downloads: [Codex releases](https://github.com/openai/codex/releases/latest)
 
 ## Usage
 

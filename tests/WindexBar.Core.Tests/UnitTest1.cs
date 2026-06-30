@@ -1108,6 +1108,17 @@ public sealed class ReleaseWorkflowTests
         Assert.DoesNotMatch(versionPattern, "1");
     }
 
+    [Fact]
+    public void ReleaseWorkflowRemovesGeneratedFullChangelogSection()
+    {
+        var workflow = File.ReadAllText(FindRepositoryFile(Path.Combine(".github", "workflows", "release.yml")));
+
+        Assert.DoesNotContain("--generate-notes", workflow, StringComparison.Ordinal);
+        Assert.Contains("releases/generate-notes", workflow, StringComparison.Ordinal);
+        Assert.Contains("Full Changelog", workflow, StringComparison.Ordinal);
+        Assert.Contains("--notes-file", workflow, StringComparison.Ordinal);
+    }
+
     private static string FindRepositoryFile(string relativePath, [CallerFilePath] string sourceFilePath = "")
     {
         foreach (var start in new[] { Path.GetDirectoryName(sourceFilePath), Directory.GetCurrentDirectory(), AppContext.BaseDirectory })
