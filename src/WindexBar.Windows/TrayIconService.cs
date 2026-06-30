@@ -224,6 +224,14 @@ public sealed class TrayIconService : IDisposable
         if (snapshot?.Primary is null)
         {
             var tokenOnlyText = TooltipTokenText(snapshot?.TokenUsage, language);
+            var resetOnlyText = TooltipResetCreditsText(snapshot?.RateLimitResetCredits, language);
+            if (tokenOnlyText is null && resetOnlyText is not null)
+            {
+                return TrimTooltip(isKorean
+                    ? $"WindexBar - \uCD08\uAE30\uD654\uAD8C {resetOnlyText}"
+                    : $"WindexBar - resets {resetOnlyText}");
+            }
+
             return tokenOnlyText is null
                 ? TrimTooltip(isKorean ? "WindexBar - Codex \uC0AC\uC6A9\uB7C9 \uC54C \uC218 \uC5C6\uC74C" : "WindexBar - Codex usage unknown")
                 : TrimTooltip(isKorean ? $"WindexBar - \uD1A0\uD070 {tokenOnlyText}" : $"WindexBar - tokens {tokenOnlyText}");
@@ -235,8 +243,8 @@ public sealed class TrayIconService : IDisposable
         var resetCreditsText = snapshot.RateLimitResetCredits is null
             ? string.Empty
             : isKorean
-                ? $", \uCD08\uAE30\uD654\uAD8C {snapshot.RateLimitResetCredits.AvailableCount:N0}"
-                : $", resets {snapshot.RateLimitResetCredits.AvailableCount:N0}";
+                ? $", \uCD08\uAE30\uD654\uAD8C {RateLimitResetCreditFormatter.FormatCompact(snapshot.RateLimitResetCredits, language)}"
+                : $", resets {RateLimitResetCreditFormatter.FormatCompact(snapshot.RateLimitResetCredits, language)}";
         var tokenText = TooltipTokenText(snapshot.TokenUsage, language);
         var tokens = tokenText is null
             ? string.Empty
@@ -276,6 +284,9 @@ public sealed class TrayIconService : IDisposable
                 ? $"\uC138\uC158 {TokenCountFormatter.Format(sessionTokens.Value, language)}"
                 : $"session {TokenCountFormatter.Format(sessionTokens.Value, language)}";
     }
+
+    private static string? TooltipResetCreditsText(RateLimitResetCreditsSnapshot? resetCredits, string language) =>
+        resetCredits is null ? null : RateLimitResetCreditFormatter.FormatCompact(resetCredits, language);
 
     private static double? TokenContextPercent(TokenUsageSnapshot? tokenUsage)
     {

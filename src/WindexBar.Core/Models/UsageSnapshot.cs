@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace WindexBar.Core.Models;
 
 public sealed record ProviderIdentitySnapshot(
@@ -54,4 +56,26 @@ public sealed record CreditsSnapshot(double Remaining, IReadOnlyList<CreditEvent
     public static CreditsSnapshot Empty(DateTimeOffset updatedAt) => new(0, Array.Empty<CreditEvent>(), updatedAt);
 }
 
-public sealed record RateLimitResetCreditsSnapshot(long AvailableCount, DateTimeOffset UpdatedAt);
+public sealed record RateLimitResetCreditObservation(DateTimeOffset FirstSeenAt, DateTimeOffset? EstimatedExpiresAt);
+
+public sealed record RateLimitResetCreditsSnapshot(
+    long AvailableCount,
+    DateTimeOffset UpdatedAt,
+    IReadOnlyList<RateLimitResetCreditObservation>? Credits = null)
+{
+    public IReadOnlyList<RateLimitResetCreditObservation> Credits { get; init; } =
+        Credits ?? Array.Empty<RateLimitResetCreditObservation>();
+
+    [JsonIgnore]
+    public long KnownExpirationCount => Credits.LongCount(credit => credit.EstimatedExpiresAt is not null);
+
+    [JsonIgnore]
+    public long UnknownExpirationCount => Math.Max(0, AvailableCount - KnownExpirationCount);
+
+    [JsonIgnore]
+    public DateTimeOffset? NextEstimatedExpiresAt =>
+        Credits
+            .Select(credit => credit.EstimatedExpiresAt)
+            .Where(expiresAt => expiresAt is not null)
+            .Min();
+}
