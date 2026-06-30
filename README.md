@@ -2,6 +2,9 @@
 
 WindexBar is a small Windows tray app for quickly checking Codex usage and status.
 
+<img width="335" height="505" alt="kr" src="https://github.com/user-attachments/assets/c545974d-044b-4b73-aaeb-5472315f8d1f" />
+<img width="341" height="507" alt="eng" src="https://github.com/user-attachments/assets/8cc6a0ca-178b-43ce-8779-8831e01842b9" />
+
 ## English
 
 ### Install
