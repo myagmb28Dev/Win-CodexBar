@@ -19,8 +19,13 @@ public sealed partial class MainWindow : Window
     private const double HudClientWidth = 265;
     private const double HudClientHeight = 318;
     private const double SettingsClientWidth = HudClientWidth;
-    private const double SettingsClientHeight = 198;
+    private const double SettingsClientHeight = 240;
     private const double KeyboardScrollStep = 36;
+    private const double StandardBarSweepStep = 0.035;
+    private const double FastBarSweepStep = 0.075;
+    private const double StandardBarEaseFactor = 0.16;
+    private const double FastBarEaseFactor = 0.28;
+    private const string FastIndicatorGlyph = "\u26A1";
 
     private readonly UsageStore _usageStore;
     private readonly SettingsStore _settingsStore;
@@ -34,6 +39,7 @@ public sealed partial class MainWindow : Window
     private double _targetWeeklyBarValue;
     private double _tokenBarValue;
     private double _targetTokenBarValue;
+    private bool _isFastServiceTier;
     private Grid TitleBarDragRegion = null!;
     private Border HudView = null!;
     private Border SettingsView = null!;
@@ -72,11 +78,13 @@ public sealed partial class MainWindow : Window
     private TextBlock RefreshIntervalLabelText = null!;
     private TextBlock SecondsLabelText = null!;
     private TextBlock LanguageLabelText = null!;
+    private TextBlock ToggleHotkeyLabelText = null!;
     private Button SettingsButton = null!;
     private Button QuitButton = null!;
     private Button CancelSettingsButton = null!;
     private Button SaveSettingsButton = null!;
     private TextBox RefreshIntervalSecondsTextBox = null!;
+    private TextBox ToggleHotkeyTextBox = null!;
     private ComboBox LanguageComboBox = null!;
 
     public MainWindow(UsageStore usageStore, SettingsStore settingsStore)
@@ -127,7 +135,7 @@ public sealed partial class MainWindow : Window
 
         var customTitleBar = new Grid { Background = Brush(0, 0, 0, 0) };
         customTitleBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        customTitleBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(84) });
+        customTitleBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(60) });
         Grid.SetRow(customTitleBar, 0);
         RootLayout.Children.Add(customTitleBar);
 
@@ -154,7 +162,6 @@ public sealed partial class MainWindow : Window
 
         windowButtons.Children.Add(CreateTitleButton(Brush(0xFF, 0xFF, 0xBD, 0x2E), MinimizeCircleButton_Click));
         windowButtons.Children.Add(CreateTitleButton(Brush(0xFF, 0x28, 0xC8, 0x40), ZoomCircleButton_Click));
-        windowButtons.Children.Add(CreateTitleButton(Brush(0xFF, 0xFF, 0x5F, 0x57), CloseCircleButton_Click));
 
         var contentRoot = new Grid { Padding = new Thickness(10, 0, 10, 10) };
         Grid.SetRow(contentRoot, 1);
@@ -397,6 +404,7 @@ public sealed partial class MainWindow : Window
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         SettingsView.Child = grid;
 
         SettingsTitleText = new TextBlock
@@ -453,13 +461,33 @@ public sealed partial class MainWindow : Window
         Grid.SetColumn(LanguageComboBox, 1);
         languageGrid.Children.Add(LanguageComboBox);
 
+        var hotkeyGrid = new Grid { ColumnSpacing = 8 };
+        hotkeyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        hotkeyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(124) });
+        Grid.SetRow(hotkeyGrid, 3);
+        grid.Children.Add(hotkeyGrid);
+
+        ToggleHotkeyLabelText = new TextBlock
+        {
+            Text = "Toggle shortcut",
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        hotkeyGrid.Children.Add(ToggleHotkeyLabelText);
+        ToggleHotkeyTextBox = new TextBox
+        {
+            TextAlignment = TextAlignment.Right,
+            MinWidth = 124
+        };
+        Grid.SetColumn(ToggleHotkeyTextBox, 1);
+        hotkeyGrid.Children.Add(ToggleHotkeyTextBox);
+
         var buttons = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             HorizontalAlignment = HorizontalAlignment.Right,
             Spacing = 6
         };
-        Grid.SetRow(buttons, 3);
+        Grid.SetRow(buttons, 4);
         grid.Children.Add(buttons);
         CancelSettingsButton = new Button { Content = "Cancel" };
         CancelSettingsButton.Click += CancelSettingsButton_Click;
@@ -485,6 +513,7 @@ public sealed partial class MainWindow : Window
     public void ShowSettingsView()
     {
         RefreshIntervalSecondsTextBox.Text = _settingsStore.Codex.RefreshIntervalSeconds.ToString();
+        ToggleHotkeyTextBox.Text = _settingsStore.Config.Hotkeys.ToggleWindow;
         SelectLanguage(_settingsStore.Config.Language);
         HudView.Visibility = Visibility.Collapsed;
         SettingsView.Visibility = Visibility.Visible;
@@ -535,11 +564,14 @@ public sealed partial class MainWindow : Window
 
     private void AnimateProgressBars()
     {
-        _barSweepPhase = (_barSweepPhase + 0.035) % 1.0;
+        var sweepStep = _isFastServiceTier ? FastBarSweepStep : StandardBarSweepStep;
+        var activeWindowEaseFactor = _isFastServiceTier ? FastBarEaseFactor : StandardBarEaseFactor;
+
+        _barSweepPhase = (_barSweepPhase + sweepStep) % 1.0;
         var activeWindowSweep = EaseSweep(_barSweepPhase);
-        _currentBarValue = EaseBarValue(_currentBarValue, _targetCurrentBarValue);
-        _weeklyBarValue = EaseBarValue(_weeklyBarValue, _targetWeeklyBarValue);
-        _tokenBarValue = EaseBarValue(_tokenBarValue, _targetTokenBarValue);
+        _currentBarValue = EaseBarValue(_currentBarValue, _targetCurrentBarValue, activeWindowEaseFactor);
+        _weeklyBarValue = EaseBarValue(_weeklyBarValue, _targetWeeklyBarValue, activeWindowEaseFactor);
+        _tokenBarValue = EaseBarValue(_tokenBarValue, _targetTokenBarValue, StandardBarEaseFactor);
         ApplyActiveBarProgress(
             CurrentWindowTrackRoot,
             CurrentWindowFillBar,
@@ -563,10 +595,10 @@ public sealed partial class MainWindow : Window
             activeWindowSweep);
     }
 
-    private static double EaseBarValue(double current, double target)
+    private static double EaseBarValue(double current, double target, double factor)
     {
         var delta = target - current;
-        return Math.Abs(delta) < 0.1 ? target : current + (delta * 0.16);
+        return Math.Abs(delta) < 0.1 ? target : current + (delta * factor);
     }
 
     private static double EaseSweep(double amount) => 1 - Math.Pow(1 - amount, 2);
@@ -641,16 +673,8 @@ public sealed partial class MainWindow : Window
         HudScrollViewer.ChangeView(null, targetOffset, null, disableAnimation: false);
     }
 
-    private void CloseCircleButton_Click(object sender, RoutedEventArgs args) => WindowCloseBehavior.Hide(this);
-
     private void MinimizeCircleButton_Click(object sender, RoutedEventArgs args)
     {
-        if (AppWindow.Presenter is OverlappedPresenter presenter)
-        {
-            presenter.Minimize();
-            return;
-        }
-
         WindowCloseBehavior.Hide(this);
     }
 
@@ -682,6 +706,9 @@ public sealed partial class MainWindow : Window
             codex.RefreshIntervalSeconds = ReadRefreshIntervalSeconds();
             config.SetProviderConfig(codex);
             config.Language = ReadSelectedLanguage();
+            config.Hotkeys.ToggleWindow = HotkeyShortcut.NormalizeOrDefault(
+                ToggleHotkeyTextBox.Text,
+                WindexBarConfig.DefaultToggleWindowHotkey);
         });
         _usageStore.StartBackgroundRefresh();
         ShowHudView();
@@ -728,9 +755,7 @@ public sealed partial class MainWindow : Window
     private void ApplyLanguage()
     {
         Title = SettingsView.Visibility == Visibility.Visible ? Text("WindexBar Settings", "WindexBar \uC124\uC815") : "WindexBar";
-        CurrentWindowLabelText.Text = Text("Current", "\uD604\uC7AC");
-        WeeklyWindowLabelText.Text = Text("Weekly", "\uC8FC\uAC04");
-        TokenWindowLabelText.Text = Text("Tokens", "\uD1A0\uD070");
+        ApplyWindowSectionLabels();
         CreditsLabelText.Text = Text("Credits", "\uD06C\uB808\uB527");
         ResetCreditsLabelText.Text = Text("Reset credits", "\uCD08\uAE30\uD654\uAD8C");
         AccountLabelText.Text = Text("Account", "\uACC4\uC815");
@@ -740,6 +765,7 @@ public sealed partial class MainWindow : Window
         RefreshIntervalLabelText.Text = Text("Refresh interval", "\uC0C8\uB85C\uACE0\uCE68 \uAC04\uACA9");
         SecondsLabelText.Text = Text("s", "\uCD08");
         LanguageLabelText.Text = Text("Language", "\uC5B8\uC5B4");
+        ToggleHotkeyLabelText.Text = Text("Toggle shortcut", "\uD1A0\uAE00 \uB2E8\uCD95\uD0A4");
         CancelSettingsButton.Content = Text("Cancel", "\uCDE8\uC18C");
         SaveSettingsButton.Content = Text("Save", "\uC800\uC7A5");
     }
@@ -752,6 +778,36 @@ public sealed partial class MainWindow : Window
 
     private string UnknownText => Text("unknown", "\uC54C \uC218 \uC5C6\uC74C");
 
+    private void ApplyWindowSectionLabels()
+    {
+        CurrentWindowLabelText.Text = WithFastIndicator(Text("Current", "\uD604\uC7AC"));
+        WeeklyWindowLabelText.Text = WithFastIndicator(Text("Weekly", "\uC8FC\uAC04"));
+        TokenWindowLabelText.Text = Text("Tokens", "\uD1A0\uD070");
+    }
+
+    private string WithFastIndicator(string label) =>
+        _isFastServiceTier ? $"{label} {FastIndicatorGlyph}" : label;
+
+    private void ApplyProgressBarTheme()
+    {
+        ApplyProgressBarTheme(CurrentWindowFillBar, CurrentWindowSweepBar, _isFastServiceTier);
+        ApplyProgressBarTheme(WeeklyWindowFillBar, WeeklyWindowSweepBar, _isFastServiceTier);
+        ApplyProgressBarTheme(TokenWindowFillBar, TokenWindowSweepBar, isFast: false);
+    }
+
+    private static void ApplyProgressBarTheme(Border fillBar, Border sweepBar, bool isFast)
+    {
+        fillBar.Background = isFast
+            ? Brush(0xFF, 0xD7, 0x56, 0x7D)
+            : Brush(0xFF, 0x8D, 0x78, 0xD6);
+        sweepBar.Background = isFast
+            ? Brush(0xFF, 0xFF, 0x9D, 0xB2)
+            : Brush(0xFF, 0xC8, 0xB9, 0xFF);
+    }
+
+    private static bool IsFastServiceTier(CodexModelSelection? activeModel) =>
+        string.Equals(activeModel?.ServiceTier, "fast", StringComparison.OrdinalIgnoreCase);
+
     private void QuitButton_Click(object sender, RoutedEventArgs args) => App.Current.Shutdown();
 
     private void UpdateState()
@@ -761,6 +817,10 @@ public sealed partial class MainWindow : Window
         var snapshot = _usageStore.Snapshot;
         var credits = _usageStore.Credits;
         var disabled = !_settingsStore.Codex.Enabled;
+
+        _isFastServiceTier = IsFastServiceTier(snapshot?.ActiveModel);
+        ApplyWindowSectionLabels();
+        ApplyProgressBarTheme();
 
         CreditsText.Text = credits is null
             ? UnknownText

@@ -26,9 +26,15 @@ public static class CodexSessionStateReader
             var fromSession = ReadLatestSession(codexHome);
             if (fromSession is not null)
             {
-                return fromSession.ActiveModel is null
-                    ? fromSession with { ActiveModel = ReadConfigDefaults(codexHome) }
-                    : fromSession;
+                var sessionConfigDefault = ReadConfigDefaults(codexHome);
+                if (fromSession.ActiveModel is null)
+                {
+                    return fromSession with { ActiveModel = sessionConfigDefault };
+                }
+
+                return sessionConfigDefault is null
+                    ? fromSession
+                    : fromSession with { ActiveModel = MergeConfigDefaults(fromSession.ActiveModel, sessionConfigDefault) };
             }
 
             var configDefault = ReadConfigDefaults(codexHome);
@@ -245,8 +251,9 @@ public static class CodexSessionStateReader
         }
 
         var effort = ReadReasoningEffort(payload);
+        var serviceTier = ReadServiceTier(payload);
         var timestamp = TryGetTimestamp(root);
-        return CreateSelection(model, effort, timestamp);
+        return CreateSelection(model, effort, serviceTier, timestamp);
     }
 
     private static CodexModelSelection? ReadThreadSettings(JsonElement root, JsonElement payload)
@@ -265,8 +272,9 @@ public static class CodexSessionStateReader
         var effort = TryReadCollaborationModeReasoningEffort(settings, out var collaborationEffort)
             ? collaborationEffort
             : ReadReasoningEffort(settings);
+        var serviceTier = ReadServiceTier(settings);
         var timestamp = TryGetTimestamp(root);
-        return CreateSelection(model, effort, timestamp);
+        return CreateSelection(model, effort, serviceTier, timestamp);
     }
 
     private static bool TryReadRateLimits(JsonElement payload, out ModelUsageSnapshot model)
@@ -456,6 +464,21 @@ public static class CodexSessionStateReader
         }
 
         return TryReadCollaborationModeReasoningEffort(payload, out var fallback) ? fallback : null;
+    }
+
+    private static string? ReadServiceTier(JsonElement payload)
+    {
+        if (TryGetString(payload, "serviceTier", out var serviceTier))
+        {
+            return serviceTier;
+        }
+
+        if (TryGetString(payload, "service_tier", out serviceTier))
+        {
+            return serviceTier;
+        }
+
+        return null;
     }
 
     private static bool TryReadCollaborationModeModel(JsonElement payload, out string? value) =>
@@ -680,6 +703,7 @@ public static class CodexSessionStateReader
 
         string? model = null;
         string? effort = null;
+        string? serviceTier = null;
 
         foreach (var rawLine in File.ReadLines(configPath))
         {
@@ -698,10 +722,16 @@ public static class CodexSessionStateReader
             if (TryReadTomlString(line, "model_reasoning_effort", out var parsedEffort))
             {
                 effort = parsedEffort;
+                continue;
+            }
+
+            if (TryReadTomlString(line, "service_tier", out var parsedServiceTier))
+            {
+                serviceTier = parsedServiceTier;
             }
         }
 
-        return string.IsNullOrWhiteSpace(model) ? null : CreateSelection(model, effort, File.GetLastWriteTimeUtc(configPath));
+        return string.IsNullOrWhiteSpace(model) ? null : CreateSelection(model, effort, serviceTier, File.GetLastWriteTimeUtc(configPath));
     }
 
     private static string StripTomlComment(string line)
@@ -748,12 +778,24 @@ public static class CodexSessionStateReader
         return value is not null;
     }
 
-    private static CodexModelSelection CreateSelection(string model, string? effort, DateTimeOffset? updatedAt)
+    private static CodexModelSelection MergeConfigDefaults(CodexModelSelection selection, CodexModelSelection configDefault)
+    {
+        if (!string.IsNullOrWhiteSpace(selection.ServiceTier))
+        {
+            return selection;
+        }
+
+        return CreateSelection(selection.Model, selection.ReasoningEffort, configDefault.ServiceTier, selection.UpdatedAt);
+    }
+
+    private static CodexModelSelection CreateSelection(string model, string? effort, string? serviceTier, DateTimeOffset? updatedAt)
     {
         var modelName = CodexUsageMapper.FormatModelName(model);
         var effortName = FormatReasoningEffort(effort);
-        var displayName = string.IsNullOrWhiteSpace(effortName) ? modelName : $"{modelName} {effortName}";
-        return new CodexModelSelection(model, NormalizeEffort(effort), displayName, updatedAt);
+        var serviceTierName = FormatServiceTierForDisplay(serviceTier);
+        var displayName = string.Join(" ", new[] { modelName, effortName, serviceTierName }
+            .Where(part => !string.IsNullOrWhiteSpace(part)));
+        return new CodexModelSelection(model, NormalizeEffort(effort), NormalizeServiceTier(serviceTier), displayName, updatedAt);
     }
 
     private static string? FormatReasoningEffort(string? effort)
@@ -774,6 +816,30 @@ public static class CodexSessionStateReader
     {
         var trimmed = effort?.Trim();
         return string.IsNullOrWhiteSpace(trimmed) ? null : trimmed.ToLowerInvariant();
+    }
+
+    private static string? FormatServiceTierForDisplay(string? serviceTier)
+    {
+        return NormalizeServiceTier(serviceTier) switch
+        {
+            "fast" => "Fast",
+            _ => null
+        };
+    }
+
+    private static string? NormalizeServiceTier(string? serviceTier)
+    {
+        var trimmed = serviceTier?.Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            return null;
+        }
+
+        return trimmed.ToLowerInvariant() switch
+        {
+            "default" or "normal" => "standard",
+            var normalized => normalized
+        };
     }
 
     private static DateTimeOffset? TryGetTimestamp(JsonElement root)

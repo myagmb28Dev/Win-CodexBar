@@ -341,6 +341,7 @@ public sealed class ConfigTests
         Assert.Equal(WindexBarConfig.DefaultRefreshIntervalSeconds, reloaded.GetProviderConfig(UsageProvider.Codex).RefreshIntervalSeconds);
         Assert.False(reloaded.ClickThroughHud);
         Assert.Equal(WindexBarConfig.DefaultLanguage, reloaded.Language);
+        Assert.Equal(WindexBarConfig.DefaultToggleWindowHotkey, reloaded.Hotkeys.ToggleWindow);
     }
 
     [Fact]
@@ -413,6 +414,78 @@ public sealed class ConfigTests
         var config = store.LoadOrCreateDefault();
 
         Assert.Equal("ko", config.Language);
+    }
+
+    [Fact]
+    public void NormalizesSavedToggleHotkey()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "config.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, """
+        {
+          "version": 1,
+          "hotkeys": {
+            "toggleWindow": "alt + o"
+          },
+          "providers": [
+            { "id": "codex", "enabled": true, "source": "cli" }
+          ]
+        }
+        """);
+        var store = new WindexBarConfigStore(path);
+
+        var config = store.LoadOrCreateDefault();
+
+        Assert.Equal("Alt+O", config.Hotkeys.ToggleWindow);
+    }
+
+    [Fact]
+    public void InvalidToggleHotkeyFallsBackToDefault()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "config.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, """
+        {
+          "version": 1,
+          "hotkeys": {
+            "toggleWindow": "O"
+          },
+          "providers": [
+            { "id": "codex", "enabled": true, "source": "cli" }
+          ]
+        }
+        """);
+        var store = new WindexBarConfigStore(path);
+
+        var config = store.LoadOrCreateDefault();
+
+        Assert.Equal(WindexBarConfig.DefaultToggleWindowHotkey, config.Hotkeys.ToggleWindow);
+    }
+}
+
+public sealed class HotkeyShortcutTests
+{
+    [Theory]
+    [InlineData("alt+o", "Alt+O")]
+    [InlineData("Ctrl + Shift + F12", "Ctrl+Shift+F12")]
+    [InlineData("win + space", "Win+Space")]
+    public void NormalizesShortcutText(string value, string expected)
+    {
+        var parsed = HotkeyShortcut.TryParse(value, out var shortcut);
+
+        Assert.True(parsed);
+        Assert.Equal(expected, shortcut!.DisplayText);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("O")]
+    [InlineData("Alt")]
+    [InlineData("Alt+Ctrl")]
+    [InlineData("Alt+O+P")]
+    public void RejectsIncompleteOrAmbiguousShortcutText(string value)
+    {
+        Assert.False(HotkeyShortcut.TryParse(value, out _));
     }
 }
 
@@ -553,6 +626,46 @@ public sealed class CodexSessionStateReaderTests
     }
 
     [Fact]
+    public void ReadsServiceTierFromThreadSettingsUpdated()
+    {
+        var codexHome = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var sessionDir = Path.Combine(codexHome, "sessions", "2026", "06", "18");
+        Directory.CreateDirectory(sessionDir);
+
+        var userPath = Path.Combine(sessionDir, "rollout-user.jsonl");
+        File.WriteAllText(userPath, """
+        {"timestamp":"2026-06-18T00:59:00Z","type":"session_meta","payload":{"id":"user","thread_source":"user","source":"desktop"}}
+        {"timestamp":"2026-06-18T00:59:01Z","type":"thread_settings_updated","payload":{"threadSettings":{"model":"gpt-5.5","effort":"high","serviceTier":"fast","collaborationMode":{"settings":{"model":"gpt-5.5","reasoning_effort":"high"}}}}}
+        """);
+
+        var selection = CodexSessionStateReader.ReadLatest(TestEnvironment(codexHome));
+
+        Assert.NotNull(selection);
+        Assert.Equal("fast", selection!.ServiceTier);
+        Assert.Equal("GPT-5.5 High Fast", selection.DisplayName);
+    }
+
+    [Fact]
+    public void KeepsPriorityServiceTierOutOfDisplayName()
+    {
+        var codexHome = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var sessionDir = Path.Combine(codexHome, "sessions", "2026", "06", "18");
+        Directory.CreateDirectory(sessionDir);
+
+        var userPath = Path.Combine(sessionDir, "rollout-user.jsonl");
+        File.WriteAllText(userPath, """
+        {"timestamp":"2026-06-18T00:59:00Z","type":"session_meta","payload":{"id":"user","thread_source":"user","source":"desktop"}}
+        {"timestamp":"2026-06-18T00:59:01Z","type":"thread_settings_updated","payload":{"threadSettings":{"model":"gpt-5.5","effort":"high","serviceTier":"priority","collaborationMode":{"settings":{"model":"gpt-5.5","reasoning_effort":"high"}}}}}
+        """);
+
+        var selection = CodexSessionStateReader.ReadLatest(TestEnvironment(codexHome));
+
+        Assert.NotNull(selection);
+        Assert.Equal("priority", selection!.ServiceTier);
+        Assert.Equal("GPT-5.5 High", selection.DisplayName);
+    }
+
+    [Fact]
     public void PrefersCollaborationModeReasoningFromThreadSettings()
     {
         var codexHome = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -616,6 +729,24 @@ public sealed class CodexSessionStateReaderTests
 
         Assert.NotNull(selection);
         Assert.Equal("GPT-5.5 High", selection!.DisplayName);
+    }
+
+    [Fact]
+    public void FallsBackToConfigServiceTierWhenSessionIsUnavailable()
+    {
+        var codexHome = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(codexHome);
+        File.WriteAllText(Path.Combine(codexHome, "config.toml"), """
+        model = "gpt-5.5"
+        model_reasoning_effort = "high"
+        service_tier = "fast"
+        """);
+
+        var selection = CodexSessionStateReader.ReadLatest(TestEnvironment(codexHome));
+
+        Assert.NotNull(selection);
+        Assert.Equal("fast", selection!.ServiceTier);
+        Assert.Equal("GPT-5.5 High Fast", selection.DisplayName);
     }
 
     [Fact]

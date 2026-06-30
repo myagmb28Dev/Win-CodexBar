@@ -10,6 +10,7 @@ public sealed class WindexBarConfig
     public const int DefaultRefreshIntervalSeconds = 30;
     public const int MaxRefreshIntervalSeconds = 3600;
     public const string DefaultLanguage = "en";
+    public const string DefaultToggleWindowHotkey = "Alt+O";
 
     [JsonPropertyName("version")]
     public int Version { get; set; } = CurrentVersion;
@@ -23,12 +24,16 @@ public sealed class WindexBarConfig
     [JsonPropertyName("language")]
     public string Language { get; set; } = DefaultLanguage;
 
+    [JsonPropertyName("hotkeys")]
+    public HotkeyConfig Hotkeys { get; set; } = new();
+
     public static WindexBarConfig Default() => new();
 
     public WindexBarConfig Normalized()
     {
         Version = CurrentVersion;
         Language = NormalizeLanguage(Language);
+        Hotkeys = (Hotkeys ?? new HotkeyConfig()).Normalized();
 
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var normalized = new List<ProviderConfig>();
@@ -76,6 +81,20 @@ public sealed class WindexBarConfig
         }
 
         Providers.Add(value.Normalized());
+    }
+}
+
+public sealed class HotkeyConfig
+{
+    [JsonPropertyName("toggleWindow")]
+    public string ToggleWindow { get; set; } = WindexBarConfig.DefaultToggleWindowHotkey;
+
+    public HotkeyConfig Normalized()
+    {
+        ToggleWindow = HotkeyShortcut.NormalizeOrDefault(
+            ToggleWindow,
+            WindexBarConfig.DefaultToggleWindowHotkey);
+        return this;
     }
 }
 

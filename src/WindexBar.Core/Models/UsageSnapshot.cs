@@ -29,7 +29,7 @@ public sealed record ModelUsageSnapshot(string ModelName, RateWindow? Current, R
     public bool HasRateLimitWindows => Current is not null || Weekly is not null;
 }
 
-public sealed record CodexModelSelection(string Model, string? ReasoningEffort, string DisplayName, DateTimeOffset? UpdatedAt);
+public sealed record CodexModelSelection(string Model, string? ReasoningEffort, string? ServiceTier, string DisplayName, DateTimeOffset? UpdatedAt);
 
 public sealed record TokenUsageSnapshot(
     TokenUsageBreakdown? Total,

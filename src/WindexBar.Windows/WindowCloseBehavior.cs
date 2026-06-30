@@ -34,6 +34,12 @@ internal static class WindowCloseBehavior
         _ = ShowWindow(handle, ShowWindowCommand.Hide);
     }
 
+    public static bool IsVisible(Window window)
+    {
+        var handle = WindowNative.GetWindowHandle(window);
+        return handle != IntPtr.Zero && IsWindowVisible(handle) && !IsIconic(handle);
+    }
+
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool ShowWindow(IntPtr hWnd, ShowWindowCommand command);
@@ -53,6 +59,10 @@ internal static class WindowCloseBehavior
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsIconic(IntPtr hWnd);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

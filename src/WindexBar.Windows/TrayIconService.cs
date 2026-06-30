@@ -16,6 +16,7 @@ public sealed class TrayIconService : IDisposable
     private readonly DispatcherQueue _dispatcher;
     private readonly Forms.NotifyIcon _notifyIcon;
     private readonly Drawing.Icon _defaultIcon;
+    private readonly GlobalHotkeyService _hotkeyService;
     private MainWindow? _statusWindow;
     private string? _uiError;
     private bool _disposed;
@@ -36,6 +37,8 @@ public sealed class TrayIconService : IDisposable
         _notifyIcon.MouseClick += OnMouseClick;
         _notifyIcon.MouseDoubleClick += OnMouseDoubleClick;
         _notifyIcon.DoubleClick += OnDoubleClick;
+        _hotkeyService = new GlobalHotkeyService(() => _dispatcher.TryEnqueue(ToggleStatusWindow));
+        RegisterHotkey();
         _usageStore.Changed += OnUsageChanged;
         _settingsStore.Changed += OnSettingsChanged;
         UpdateTooltip();
@@ -71,6 +74,41 @@ public sealed class TrayIconService : IDisposable
             var status = WindowCloseBehavior.Show(window);
             LogMessage($"WindexBar settings window show requested for {status}.");
         });
+    }
+
+    public void ToggleStatusWindow()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        try
+        {
+            var window = GetOrCreateStatusWindow();
+            if (WindowCloseBehavior.IsVisible(window))
+            {
+                WindowCloseBehavior.Hide(window);
+                LogMessage("WindexBar window hidden by hotkey.");
+            }
+            else
+            {
+                var status = WindowCloseBehavior.Show(window);
+                LogMessage($"WindexBar window shown by hotkey for {status}.");
+            }
+
+            _uiError = null;
+        }
+        catch (Exception error)
+        {
+            _statusWindow = null;
+            _uiError = error.Message;
+            LogMessage("Failed to toggle WindexBar window by hotkey.", error);
+        }
+        finally
+        {
+            UpdateTooltip();
+        }
     }
 
     private void TryShowWindow(Action<MainWindow> show)
@@ -148,9 +186,22 @@ public sealed class TrayIconService : IDisposable
     {
         _dispatcher.TryEnqueue(() =>
         {
+            RegisterHotkey();
             RebuildMenu();
             UpdateTooltip();
         });
+    }
+
+    private void RegisterHotkey()
+    {
+        var shortcut = _settingsStore.Config.Hotkeys.ToggleWindow;
+        if (_hotkeyService.Register(shortcut, out var error))
+        {
+            LogMessage($"Registered WindexBar toggle hotkey: {shortcut}.");
+            return;
+        }
+
+        LogMessage($"Failed to register WindexBar toggle hotkey {shortcut}: {error}");
     }
 
     private void UpdateTooltip()
@@ -281,6 +332,7 @@ public sealed class TrayIconService : IDisposable
         _notifyIcon.MouseClick -= OnMouseClick;
         _notifyIcon.MouseDoubleClick -= OnMouseDoubleClick;
         _notifyIcon.DoubleClick -= OnDoubleClick;
+        _hotkeyService.Dispose();
         _notifyIcon.Visible = false;
         _notifyIcon.ContextMenuStrip?.Dispose();
         _notifyIcon.Dispose();
