@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using WindexBar.Core.Windowing;
 using Microsoft.UI.Xaml;
 using WinRT.Interop;
 
@@ -7,7 +8,6 @@ namespace WindexBar.Windows;
 internal static class WindowCloseBehavior
 {
     private static readonly IntPtr HwndTopMost = new(-1);
-    private const uint SetWindowPosShowWindow = 0x0040;
 
     public static string Show(Window window)
     {
@@ -20,7 +20,8 @@ internal static class WindowCloseBehavior
         if (handle != IntPtr.Zero)
         {
             showResult = ShowWindow(handle, ShowWindowCommand.Show);
-            positionResult = SetWindowPos(handle, HwndTopMost, 96, 96, 420, 360, SetWindowPosShowWindow);
+            var plan = WindowActivationPlan.PreserveCurrentBounds;
+            positionResult = SetWindowPos(handle, HwndTopMost, plan.X, plan.Y, plan.Width, plan.Height, plan.Flags);
             restoreResult = ShowWindow(handle, ShowWindowCommand.Restore);
             foregroundResult = SetForegroundWindow(handle);
         }

@@ -4,6 +4,7 @@ using WindexBar.Core.Formatting;
 using WindexBar.Core.Providers;
 using WindexBar.Core.Providers.Codex;
 using WindexBar.Core.Refresh;
+using WindexBar.Core.Windowing;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -504,6 +505,130 @@ public sealed class TokenCountFormatterTests
     }
 }
 
+public sealed class RateLimitResetCreditTrackerTests
+{
+    [Fact]
+    public void FirstObservationMarksExistingCreditsAsUnknown()
+    {
+        var now = DateTimeOffset.Parse("2026-06-30T12:00:00+09:00");
+
+        var state = RateLimitResetCreditTracker.Update(new RateLimitResetCreditState(), 2, now);
+
+        Assert.True(state.HasObserved);
+        Assert.Equal(2, state.Credits.Count);
+        Assert.All(state.Credits, credit => Assert.Null(credit.EstimatedExpiresAt));
+    }
+
+    [Fact]
+    public void IncreaseAddsThirtyDayEstimatedExpiration()
+    {
+        var firstSeenAt = DateTimeOffset.Parse("2026-06-29T12:00:00+09:00");
+        var now = DateTimeOffset.Parse("2026-06-30T12:00:00+09:00");
+        var state = new RateLimitResetCreditState
+        {
+            HasObserved = true,
+            Credits = new List<RateLimitResetCreditObservation>
+            {
+                new(firstSeenAt, null)
+            }
+        };
+
+        var updated = RateLimitResetCreditTracker.Update(state, 2, now);
+
+        var estimated = Assert.Single(updated.Credits, credit => credit.EstimatedExpiresAt is not null);
+        Assert.Equal(now, estimated.FirstSeenAt);
+        Assert.Equal(now.AddDays(30), estimated.EstimatedExpiresAt);
+    }
+
+    [Fact]
+    public void DecreaseRemovesEarliestEstimatedExpiration()
+    {
+        var earlier = new RateLimitResetCreditObservation(
+            DateTimeOffset.Parse("2026-06-29T12:00:00+09:00"),
+            DateTimeOffset.Parse("2026-07-29T12:00:00+09:00"));
+        var later = new RateLimitResetCreditObservation(
+            DateTimeOffset.Parse("2026-06-30T12:00:00+09:00"),
+            DateTimeOffset.Parse("2026-07-30T12:00:00+09:00"));
+        var state = new RateLimitResetCreditState
+        {
+            HasObserved = true,
+            Credits = new List<RateLimitResetCreditObservation> { later, earlier }
+        };
+
+        var updated = RateLimitResetCreditTracker.Update(state, 1, DateTimeOffset.Parse("2026-07-01T12:00:00+09:00"));
+
+        Assert.Equal(later, Assert.Single(updated.Credits));
+    }
+
+    [Fact]
+    public void SnapshotReportsNextEstimatedExpirationAndUnknownCount()
+    {
+        var now = DateTimeOffset.Parse("2026-06-30T12:00:00+09:00");
+        var snapshot = new RateLimitResetCreditsSnapshot(
+            2,
+            now,
+            new List<RateLimitResetCreditObservation>
+            {
+                new(now.AddDays(-1), null),
+                new(now, now.AddDays(30))
+            });
+
+        Assert.Equal(1, snapshot.UnknownExpirationCount);
+        Assert.Equal(now.AddDays(30), snapshot.NextEstimatedExpiresAt);
+    }
+}
+
+public sealed class RateLimitResetCreditFormatterTests
+{
+    [Fact]
+    public void FormatsEstimatedExpirationAndUnknownCredit()
+    {
+        var now = DateTimeOffset.Parse("2026-06-30T12:00:00+09:00");
+        var snapshot = new RateLimitResetCreditsSnapshot(
+            2,
+            now,
+            new List<RateLimitResetCreditObservation>
+            {
+                new(now.AddDays(-1), null),
+                new(now, now.AddDays(30))
+            });
+
+        var text = RateLimitResetCreditFormatter.Format(snapshot, "en", now);
+
+        Assert.Contains("2 available", text, StringComparison.Ordinal);
+        Assert.Contains("next estimated expiry in 30d", text, StringComparison.Ordinal);
+        Assert.Contains("1 expiry unknown", text, StringComparison.Ordinal);
+    }
+}
+
+public sealed class WindowPlacementControllerTests
+{
+    [Fact]
+    public void FirstResizeUsesDefaultPositionThenPreservesCurrentPosition()
+    {
+        var controller = new WindowPlacementController(new WindowPosition(96, 96));
+
+        var initialPosition = controller.PositionForResize(new WindowPosition(320, 220));
+        var restoredPosition = controller.PositionForResize(new WindowPosition(320, 220));
+
+        Assert.Equal(new WindowPosition(96, 96), initialPosition);
+        Assert.Equal(new WindowPosition(320, 220), restoredPosition);
+    }
+
+    [Fact]
+    public void ActivationPlanPreservesCurrentBounds()
+    {
+        var plan = WindowActivationPlan.PreserveCurrentBounds;
+
+        Assert.True(plan.PreservesPosition);
+        Assert.True(plan.PreservesSize);
+        Assert.Equal(0, plan.X);
+        Assert.Equal(0, plan.Y);
+        Assert.Equal(0, plan.Width);
+        Assert.Equal(0, plan.Height);
+    }
+}
+
 public sealed class CodexSessionStateReaderTests
 {
     [Fact]
@@ -859,6 +984,33 @@ public sealed class UsageStoreTests
         Assert.Null(store.LastError);
     }
 
+    [Fact]
+    public async Task RefreshTracksResetCreditIncreaseFromLocalObservation()
+    {
+        var firstObservation = DateTimeOffset.Parse("2026-06-29T12:00:00+09:00");
+        var secondObservation = DateTimeOffset.Parse("2026-06-30T12:00:00+09:00");
+        var settings = TestSettings();
+        var descriptor = TestDescriptor(
+            FetchResultWithResetCredits(1, firstObservation),
+            FetchResultWithResetCredits(2, secondObservation));
+        var store = new UsageStore(
+            settings,
+            descriptor,
+            new RateLimitResetCreditTracker(new InMemoryRateLimitResetCreditStateStore()));
+
+        await store.RefreshAsync(CancellationToken.None);
+
+        Assert.Equal(1, store.Snapshot!.RateLimitResetCredits!.UnknownExpirationCount);
+        Assert.Null(store.Snapshot.RateLimitResetCredits.NextEstimatedExpiresAt);
+
+        await store.RefreshAsync(CancellationToken.None);
+
+        var resetCredits = store.Snapshot!.RateLimitResetCredits!;
+        Assert.Equal(2, resetCredits.AvailableCount);
+        Assert.Equal(1, resetCredits.UnknownExpirationCount);
+        Assert.Equal(secondObservation.AddDays(30), resetCredits.NextEstimatedExpiresAt);
+    }
+
     private static SettingsStore TestSettings()
     {
         var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "config.json");
@@ -884,6 +1036,19 @@ public sealed class UsageStoreTests
             now,
             new ProviderIdentitySnapshot(UsageProvider.Codex, "me@example.com", null, "plus"));
         var credits = new CreditsSnapshot(creditsRemaining, Array.Empty<CreditEvent>(), now);
+        return new ProviderFetchResult(usage, credits, "test", "test", ProviderFetchKind.LocalProbe);
+    }
+
+    private static ProviderFetchResult FetchResultWithResetCredits(long resetCreditCount, DateTimeOffset now)
+    {
+        var usage = new UsageSnapshot(
+            new RateWindow(10, 300, DateTimeOffset.FromUnixTimeSeconds(1_800_000_000), "in 1h"),
+            null,
+            null,
+            now,
+            new ProviderIdentitySnapshot(UsageProvider.Codex, "me@example.com", null, "plus"),
+            RateLimitResetCredits: new RateLimitResetCreditsSnapshot(resetCreditCount, now));
+        var credits = new CreditsSnapshot(55, Array.Empty<CreditEvent>(), now);
         return new ProviderFetchResult(usage, credits, "test", "test", ProviderFetchKind.LocalProbe);
     }
 }
@@ -995,6 +1160,18 @@ internal sealed class QueueProviderFetchStrategy : IProviderFetchStrategy
     }
 
     public bool ShouldFallback(Exception error, ProviderFetchContext context) => false;
+}
+
+internal sealed class InMemoryRateLimitResetCreditStateStore : IRateLimitResetCreditStateStore
+{
+    private RateLimitResetCreditState _state = new();
+
+    public RateLimitResetCreditState Load() => _state;
+
+    public void Save(RateLimitResetCreditState state)
+    {
+        _state = state;
+    }
 }
 
 internal sealed class QueueCodexRpcTransportFactory : ICodexRpcTransportFactory

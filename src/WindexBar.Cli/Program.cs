@@ -60,7 +60,7 @@ else
     Console.WriteLine($"  Weekly:  {FormatWindow(payload.Secondary)}");
     if (payload.RateLimitResetCredits is not null)
     {
-        Console.WriteLine($"  Limit resets: {payload.RateLimitResetCredits.AvailableCount:N0} available");
+        Console.WriteLine($"  Limit resets: {RateLimitResetCreditFormatter.Format(payload.RateLimitResetCredits, settings.Config.Language)}");
     }
 
     if (payload.CreditsRemaining is not null)

@@ -2,6 +2,7 @@ using WindexBar.Core.Config;
 using WindexBar.Core.Formatting;
 using WindexBar.Core.Models;
 using WindexBar.Core.Refresh;
+using WindexBar.Core.Windowing;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -30,6 +31,7 @@ public sealed partial class MainWindow : Window
     private readonly UsageStore _usageStore;
     private readonly SettingsStore _settingsStore;
     private readonly WinUiDispatcherQueue _dispatcher;
+    private readonly WindowPlacementController _windowPlacement = new(new WindowPosition(96, 96));
     private readonly DispatcherTimer _barAnimationTimer = new();
     private readonly List<ModelUsageView> _modelUsages = [];
     private double _barSweepPhase;
@@ -556,10 +558,11 @@ public sealed partial class MainWindow : Window
     private void ResizeClientToEffectiveSize(double width, double height)
     {
         var scale = RootLayout.XamlRoot?.RasterizationScale ?? 1;
+        var position = _windowPlacement.PositionForResize(new WindowPosition(AppWindow.Position.X, AppWindow.Position.Y));
         AppWindow.ResizeClient(new SizeInt32(
             (int)Math.Ceiling(width * scale),
             (int)Math.Ceiling(height * scale)));
-        AppWindow.Move(new PointInt32(96, 96));
+        AppWindow.Move(new PointInt32(position.X, position.Y));
     }
 
     private void AnimateProgressBars()
@@ -1040,14 +1043,7 @@ public sealed partial class MainWindow : Window
 
     private string FormatRateLimitResetCredits(RateLimitResetCreditsSnapshot? resetCredits)
     {
-        if (resetCredits is null)
-        {
-            return UnknownText;
-        }
-
-        return IsKorean
-            ? $"{resetCredits.AvailableCount:N0}\uAC1C \uB0A8\uC74C"
-            : $"{resetCredits.AvailableCount:N0} available";
+        return RateLimitResetCreditFormatter.Format(resetCredits, CurrentLanguage);
     }
 
     private string FormatResetDescription(DateTimeOffset resetsAt)
