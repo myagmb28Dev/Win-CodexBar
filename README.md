@@ -12,6 +12,7 @@ GitHub Release에서 `WindexBarSetup.exe`를 내려받아 실행합니다.
 
 - 왼쪽 클릭: 상태 창 열기
 - 오른쪽 클릭: Settings, Quit
+- ALT + O 단축키로 창 숨기기, 나타내기 가능
 
 ## 개발
 
